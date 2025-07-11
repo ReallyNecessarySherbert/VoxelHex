@@ -16,6 +16,7 @@ struct Cube {
 
 const OOB_SECTANT = 64u;
 const BOX_NODE_DIMENSION = 4u;
+const BOX_NODE_DIMENSION_SQUARED = 16u;
 const BOX_NODE_CHILDREN_COUNT = 64u;
 const FLOAT_ERROR_TOLERANCE = 0.00001;
 const COLOR_FOR_NODE_REQUEST_SENT = vec3f(0.5,0.3,0.0);
@@ -35,8 +36,43 @@ fn hash_region(offset: vec3f, size: f32) -> u32 {
     return (
         index.x
         + (index.y * BOX_NODE_DIMENSION)
-        + (index.z * BOX_NODE_DIMENSION * BOX_NODE_DIMENSION)
+        + (index.z * BOX_NODE_DIMENSION_SQUARED)
     );
+}
+
+// Unique to this implementation, not adapted from rust code
+// used to be crate::spatial::math::sectant_offset, but was replaced by LUT
+fn sectant_offset(sectant_index: u32) -> vec3f {
+    return (
+        vec3f(
+            f32(sectant_index % BOX_NODE_DIMENSION),
+            f32((sectant_index % BOX_NODE_DIMENSION_SQUARED) / BOX_NODE_DIMENSION),
+            f32(sectant_index / BOX_NODE_DIMENSION_SQUARED)
+        )
+        / f32(BOX_NODE_DIMENSION)
+    );
+}
+
+// crate::spatial::raytracing::step_sectant
+fn calculate_next_sectant(current_sectant: u32, step: vec3f) -> u32 {
+    // if we're already out of bounds, stay out of bounds
+    if (current_sectant >= BOX_NODE_CHILDREN_COUNT) {
+        return OOB_SECTANT;
+    }
+
+    // apply the step
+    let next_coords = sectant_offset(current_sectant) * f32(BOX_NODE_DIMENSION) + step;
+
+    // check for OOB
+    if (
+        any(next_coords < vec3f(0.))
+        || any(next_coords >= vec3f(i32(BOX_NODE_DIMENSION)))
+    ) {
+        return OOB_SECTANT;
+    }
+
+    // reconstruct the 1D index from the new 3D coordinates
+    return hash_region(next_coords, f32(BOX_NODE_DIMENSION));
 }
 
 struct CubeRayIntersection {
@@ -512,47 +548,6 @@ fn traverse_node_for_ocbits(
     return result;
 }
 
-fn calculate_next_sectant(current_sectant: u32, step: vec3i) -> u32 {
-    const DIM: u32 = 4u; // FIXME: hardcoded
-    const DIM_SQ: u32 = 16u; // DIM * DIM
-    const CHILDREN_COUNT: u32 = 64u; // DIM * DIM * DIM
-
-    // if we're already out of bounds, stay out of bounds
-    if (current_sectant >= CHILDREN_COUNT) {
-        return OOB_SECTANT;
-    }
-
-    // deconstruct the 1D index into 3D integer coordinates
-    let ix = i32(current_sectant % DIM);
-    let iy = i32((current_sectant % DIM_SQ) / DIM);
-    let iz = i32(current_sectant / DIM_SQ);
-    let current_coords = vec3i(ix, iy, iz);
-
-    // apply the step
-    let next_coords = current_coords + step;
-
-    // ccheck for OOB
-    if (any(next_coords < vec3i(0)) || any(next_coords >= vec3i(i32(DIM)))) {
-        return OOB_SECTANT;
-    }
-
-    // reconstruct the 1D index from the new 3D coordinates
-    let next_coords_u = vec3u(next_coords);
-    return next_coords_u.x + (next_coords_u.y * DIM) + (next_coords_u.z * DIM_SQ);
-}
-
-fn get_sectant_offset(sectant_index: u32) -> vec3f {
-    const DIM: u32 = 4u; // FIXME: hardcoded
-    const DIM_F: f32 = 4.0;
-    const DIM_SQ: u32 = 16u;
-
-    let ix = f32(sectant_index % DIM);
-    let iy = f32((sectant_index % DIM_SQ) / DIM);
-    let iz = f32(sectant_index / DIM_SQ);
-
-    return vec3f(ix, iy, iz) / DIM_F;
-}
-
 fn get_by_ray(ray: ptr<function, Line>, start_distance: f32) -> OctreeRayIntersection {
     var ray_scale_factors = get_dda_scale_factors(ray); // Should be const, but then it can't be passed as ptr
     var tmp_vec = vec3f(1.) + normalize((*ray).direction); // using local variable as temporary storage
@@ -608,7 +603,7 @@ fn get_by_ray(ray: ptr<function, Line>, start_distance: f32) -> OctreeRayInterse
         target_bounds.size = round(current_bounds.size / f32(BOX_NODE_DIMENSION));
         target_bounds.min_position = (
             current_bounds.min_position
-            + (get_sectant_offset(target_sectant) * current_bounds.size)
+            + (sectant_offset(target_sectant) * current_bounds.size)
         );
         node_stack_push(&node_stack, &node_stack_meta, BOXTREE_ROOT_NODE_KEY);
         /*// +++ DEBUG +++
@@ -739,15 +734,6 @@ fn get_by_ray(ray: ptr<function, Line>, start_distance: f32) -> OctreeRayInterse
                 current_bounds.min_position -= current_bounds.min_position % current_bounds.size;
                 let ray_point_before_pop = ray_current_point;
 
-                let sectant_of_exited_node = hash_region(
-                    (
-                        target_bounds.min_position
-                        + vec3f(target_bounds.size / 2.)
-                        - current_bounds.min_position
-                    ),
-                    current_bounds.size
-                );
-
                 tmp_vec = round(dda_step_to_next_sibling(
                     ray, &ray_current_point, &target_bounds,
                     &ray_scale_factors
@@ -760,7 +746,17 @@ fn get_by_ray(ray: ptr<function, Line>, start_distance: f32) -> OctreeRayInterse
                     return OctreeRayIntersection( false, vec4f(0.), ray_point_before_pop, vec3f(0., 0., 1.) );
                 }
 
-                target_sectant = calculate_next_sectant(sectant_of_exited_node, vec3i(tmp_vec));
+                target_sectant = calculate_next_sectant(
+                    hash_region(
+                        (
+                            target_bounds.min_position
+                            + vec3f(target_bounds.size / 2.)
+                            - current_bounds.min_position
+                        ),
+                        current_bounds.size
+                    ),
+                    tmp_vec
+                );
 
                 target_bounds.min_position += tmp_vec * target_bounds.size;
                 current_node_key = select(
@@ -791,7 +787,7 @@ fn get_by_ray(ray: ptr<function, Line>, start_distance: f32) -> OctreeRayInterse
                 target_bounds.size = round(current_bounds.size / f32(BOX_NODE_DIMENSION));
                 target_bounds.min_position = (
                     current_bounds.min_position
-                    + (get_sectant_offset(target_sectant) * current_bounds.size)
+                    + (sectant_offset(target_sectant) * current_bounds.size)
                 );
                 node_stack_push(&node_stack, &node_stack_meta, target_child_descriptor);
             } else {
@@ -812,7 +808,7 @@ fn get_by_ray(ray: ptr<function, Line>, start_distance: f32) -> OctreeRayInterse
                         ray, &ray_current_point, &target_bounds,
                         &ray_scale_factors
                     ));
-                    target_sectant = calculate_next_sectant(target_sectant, vec3i(tmp_vec));
+                    target_sectant = calculate_next_sectant(target_sectant, tmp_vec);
                     target_bounds.min_position += tmp_vec * target_bounds.size;
                     if OOB_SECTANT != target_sectant {
                         target_child_descriptor = node_children[
