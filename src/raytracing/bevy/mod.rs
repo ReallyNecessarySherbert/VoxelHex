@@ -7,11 +7,11 @@ pub use crate::raytracing::bevy::types::{
     BoxTreeGPUHost, BoxTreeGPUView, BoxTreeSpyGlass, RenderBevyPlugin, VhxViewSet, Viewport,
 };
 use crate::{
-    boxtree::{Albedo, V3c, VoxelData},
+    boxtree::{Albedo, BoxTree, V3c, VoxelData},
     raytracing::bevy::{
-        data::upload_queue::{handle_changes, rebuild},
+        data::upload_queue::{rebuild, upload},
         pipeline::prepare_bind_groups,
-        types::{VhxLabel, VhxRenderNode, VhxRenderPipeline},
+        types::{UploadQueueUpdateTask, VhxLabel, VhxRenderNode, VhxRenderPipeline},
         view::{handle_resolution_updates_main_world, handle_resolution_updates_render_world},
     },
     spatial::Cube,
@@ -25,10 +25,11 @@ use bevy::{
         extract_resource::ExtractResourcePlugin, render_graph::RenderGraph, Render, RenderApp,
         RenderSet,
     },
+    tasks::AsyncComputeTaskPool,
 };
 use std::{
     hash::Hash,
-    sync::{RwLockReadGuard, RwLockWriteGuard, TryLockResult},
+    sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard, TryLockResult},
 };
 
 impl From<Vec4> for Albedo {
@@ -49,6 +50,157 @@ impl From<Albedo> for Vec4 {
             color.b as f32 / 255.,
             color.a as f32 / 255.,
         )
+    }
+}
+
+/// Handles data sync between Bevy main(CPU) world and rendering world
+/// Logic here should be as lightweight as possible!
+pub(crate) fn sync_from_main_world(
+    mut commands: Commands,
+    mut world: ResMut<bevy::render::MainWorld>,
+    render_world_viewset: Option<Res<VhxViewSet>>,
+) {
+    let Some(mut main_world_viewset) = world.get_resource_mut::<VhxViewSet>() else {
+        return; // Nothing to do without a viewset..
+    };
+
+    if render_world_viewset.is_none() || main_world_viewset.changed {
+        commands.insert_resource(main_world_viewset.clone());
+        main_world_viewset.changed = false;
+        return;
+    }
+
+    if main_world_viewset.is_empty() {
+        return; // Nothing else to do without views..
+    }
+
+    let Some(render_world_viewset) = render_world_viewset else {
+        // This shouldn't happen ?! In case main world already has an available viewset
+        // where the view images are updated, there should already be a viewset in the render world
+        commands.insert_resource(main_world_viewset.clone());
+        return;
+    };
+
+    if render_world_viewset.view(0).unwrap().new_images_ready
+        && !main_world_viewset.view(0).unwrap().new_images_ready
+    {
+        main_world_viewset.view_mut(0).unwrap().new_images_ready = true;
+    }
+}
+
+fn handle_viewport_position_updates<
+    #[cfg(all(feature = "bytecode", feature = "serialization"))] T: FromBencode
+        + ToBencode
+        + Serialize
+        + DeserializeOwned
+        + Default
+        + Eq
+        + Clone
+        + Hash
+        + VoxelData
+        + Send
+        + Sync
+        + 'static,
+    #[cfg(all(feature = "bytecode", not(feature = "serialization")))] T: FromBencode + ToBencode + Default + Eq + Clone + Hash + VoxelData + Send + Sync + 'static,
+    #[cfg(all(not(feature = "bytecode"), feature = "serialization"))] T: Serialize + DeserializeOwned + Default + Eq + Clone + Hash + VoxelData + Send + Sync + 'static,
+    #[cfg(all(not(feature = "bytecode"), not(feature = "serialization")))] T: Default + Eq + Clone + Hash + VoxelData + Send + Sync + 'static,
+>(
+    mut commands: Commands,
+    mut viewset: Option<ResMut<VhxViewSet>>,
+    mut tree_gpu_host: Option<Res<BoxTreeGPUHost<T>>>,
+    upload_queue_update: Option<Res<UploadQueueUpdateTask>>,
+) {
+    // let tree_host_clone: Res<BoxTreeGPUHost<T>> = Res::from(tree_gpu_host.clone().unwrap());
+    if let (Some(tree_host), Some(viewset)) = (tree_gpu_host.as_mut(), viewset.as_mut()) {
+        if viewset.is_empty() {
+            return; // Nothing to do without views..
+        }
+        let Some(mut view) = viewset.view_mut(0) else {
+            return;
+        };
+
+        // There have been movement lately
+        if view.spyglass.viewport.origin_delta != V3c::unit(0.) {
+            // Check if the new origin fits into the brick slot
+            if !view.brick_slot.contains(&view.spyglass.viewport.origin) {
+                view.data_handler.upload_range = Cube {
+                    min_position: view.spyglass.viewport.origin
+                        - V3c::unit(view.spyglass.viewport.frustum.z / 2.),
+                    size: view.spyglass.viewport.frustum.z,
+                };
+
+                if upload_queue_update.is_none() {
+                    // rebuild upload queue if movement was large enough
+                    let thread_pool = AsyncComputeTaskPool::get();
+                    let viewport_center = view.spyglass.viewport.origin.clone();
+                    let viewing_distance = view.spyglass.viewport.frustum.z;
+                    let brick_ownership = view.data_handler.upload_targets.brick_ownership.clone();
+                    let tree_arc = tree_host.tree.clone();
+                    commands.insert_resource(UploadQueueUpdateTask(thread_pool.spawn(
+                        async move {
+                            rebuild::<T>(
+                                &tree_arc
+                                    .read()
+                                    .expect("Expected to be able to read tree from GPU host"),
+                                viewport_center,
+                                viewing_distance,
+                                brick_ownership,
+                            )
+                        },
+                    )));
+                } else {
+                    // upload queue update already in progress! store pending viewport request
+                    view.data_handler.pending_upload_queue_update = Some((
+                        view.spyglass.viewport.origin.clone(),
+                        view.spyglass.viewport.frustum.z,
+                    ));
+                }
+                view.brick_slot = Cube::brick_slot_for(
+                    &view.spyglass.viewport.origin,
+                    tree_host
+                        .tree
+                        .read()
+                        .expect("Expected to be able to read tree from GPU host")
+                        .brick_dim,
+                );
+            }
+
+            view.spyglass.viewport.origin_delta = V3c::unit(0.);
+        }
+    }
+}
+
+impl<
+        #[cfg(all(feature = "bytecode", feature = "serialization"))] T: FromBencode
+            + ToBencode
+            + Serialize
+            + DeserializeOwned
+            + Default
+            + Eq
+            + Clone
+            + Hash
+            + VoxelData
+            + Send
+            + Sync
+            + 'static,
+        #[cfg(all(feature = "bytecode", not(feature = "serialization")))] T: FromBencode + ToBencode + Default + Eq + Clone + Hash + VoxelData + Send + Sync + 'static,
+        #[cfg(all(not(feature = "bytecode"), feature = "serialization"))] T: Serialize
+            + DeserializeOwned
+            + Default
+            + Eq
+            + Clone
+            + Hash
+            + VoxelData
+            + Send
+            + Sync
+            + 'static,
+        #[cfg(all(not(feature = "bytecode"), not(feature = "serialization")))] T: Default + Eq + Clone + Hash + VoxelData + Send + Sync + 'static,
+    > BoxTreeGPUHost<T>
+{
+    pub fn new(tree: BoxTree<T>) -> Self {
+        BoxTreeGPUHost {
+            tree: Arc::new(RwLock::new(tree)),
+        }
     }
 }
 
@@ -173,103 +325,6 @@ where
     }
 }
 
-/// Handles data sync between Bevy main(CPU) world and rendering world
-/// Logic here should be as lightweight as possible!
-pub(crate) fn sync_from_main_world(
-    mut commands: Commands,
-    mut world: ResMut<bevy::render::MainWorld>,
-    render_world_viewset: Option<Res<VhxViewSet>>,
-) {
-    let Some(mut main_world_viewset) = world.get_resource_mut::<VhxViewSet>() else {
-        return; // Nothing to do without a viewset..
-    };
-
-    if render_world_viewset.is_none() || main_world_viewset.changed {
-        commands.insert_resource(main_world_viewset.clone());
-        main_world_viewset.changed = false;
-        return;
-    }
-
-    if main_world_viewset.is_empty() {
-        return; // Nothing else to do without views..
-    }
-
-    let Some(render_world_viewset) = render_world_viewset else {
-        // This shouldn't happen ?! In case main world already has an available viewset
-        // where the view images are updated, there should already be a viewset in the render world
-        commands.insert_resource(main_world_viewset.clone());
-        return;
-    };
-
-    if render_world_viewset.view(0).unwrap().new_images_ready
-        && !main_world_viewset.view(0).unwrap().new_images_ready
-    {
-        main_world_viewset.view_mut(0).unwrap().new_images_ready = true;
-    }
-}
-
-fn handle_viewport_position_updates<
-    #[cfg(all(feature = "bytecode", feature = "serialization"))] T: FromBencode
-        + ToBencode
-        + Serialize
-        + DeserializeOwned
-        + Default
-        + Eq
-        + Clone
-        + Hash
-        + VoxelData
-        + Send
-        + Sync
-        + 'static,
-    #[cfg(all(feature = "bytecode", not(feature = "serialization")))] T: FromBencode + ToBencode + Default + Eq + Clone + Hash + VoxelData + Send + Sync + 'static,
-    #[cfg(all(not(feature = "bytecode"), feature = "serialization"))] T: Serialize + DeserializeOwned + Default + Eq + Clone + Hash + VoxelData + Send + Sync + 'static,
-    #[cfg(all(not(feature = "bytecode"), not(feature = "serialization")))] T: Default + Eq + Clone + Hash + VoxelData + Send + Sync + 'static,
->(
-    mut tree_gpu_host: Option<Res<BoxTreeGPUHost<T>>>,
-    mut viewset: Option<ResMut<VhxViewSet>>,
-) {
-    if let (Some(tree_host), Some(viewset)) = (tree_gpu_host.as_mut(), viewset.as_mut()) {
-        if viewset.is_empty() {
-            return; // Nothing to do without views..
-        }
-        let Some(mut view) = viewset.view_mut(0) else {
-            return;
-        };
-
-        // There have been movement lately
-        if view.spyglass.viewport.origin_delta != V3c::unit(0.) {
-            // Check if the new origin fits into the brick slot
-            debug_assert!(
-                view.brick_slot.contains(
-                    &(view.spyglass.viewport.origin - view.spyglass.viewport.origin_delta)
-                ),
-                "Expected old viewport position to be inside old brick slot"
-            );
-
-            if !view.brick_slot.contains(&view.spyglass.viewport.origin) {
-                view.data_handler.upload_range = Cube {
-                    min_position: view.spyglass.viewport.origin
-                        - V3c::unit(view.spyglass.viewport.frustum.z / 2.),
-                    size: view.spyglass.viewport.frustum.z,
-                };
-                rebuild::<T>(
-                    &tree_host.tree,
-                    &view.spyglass.viewport.origin.clone(),
-                    view.spyglass.viewport.frustum.z,
-                    &mut view.data_handler.upload_targets,
-                );
-
-                view.data_handler.upload_state.brick_upload_progress = 0;
-                view.data_handler.upload_state.node_upload_progress = 0;
-                view.brick_slot =
-                    Cube::brick_slot_for(&view.spyglass.viewport.origin, tree_host.tree.brick_dim);
-            }
-
-            view.spyglass.viewport.origin_delta = V3c::unit(0.);
-        }
-    }
-}
-
 impl<
         #[cfg(all(feature = "bytecode", feature = "serialization"))] T: FromBencode
             + ToBencode
@@ -304,7 +359,7 @@ impl<
             (
                 handle_resolution_updates_main_world,
                 handle_viewport_position_updates::<T>,
-                handle_changes::<T>,
+                upload::<T>,
             ),
         );
         let render_app = app.sub_app_mut(RenderApp);
@@ -312,7 +367,7 @@ impl<
         render_app.add_systems(
             Render,
             (
-                handle_changes::<T>.in_set(RenderSet::PrepareAssets),
+                upload::<T>.in_set(RenderSet::PrepareAssets),
                 prepare_bind_groups.in_set(RenderSet::PrepareBindGroups),
                 handle_resolution_updates_render_world,
             ),

@@ -37,6 +37,7 @@ pub(crate) fn re_evaluate_view_size(view: &mut BoxTreeGPUView) {
     let nodes_needed_overall = view
         .data_handler
         .upload_targets
+        .population
         .node_upload_queue
         .iter()
         .skip(view.data_handler.upload_state.node_upload_progress)
@@ -75,6 +76,7 @@ pub(crate) fn re_evaluate_view_size(view: &mut BoxTreeGPUView) {
     let bricks_needed_overall = view
         .data_handler
         .upload_targets
+        .population
         .brick_upload_queue
         .iter()
         .skip(view.data_handler.upload_state.brick_upload_progress)
@@ -83,10 +85,18 @@ pub(crate) fn re_evaluate_view_size(view: &mut BoxTreeGPUView) {
                 .data_handler
                 .upload_targets
                 .brick_ownership
+                .read()
+                .expect("Expected to be able to read brick ownership entries")
                 .contains_right(&item.ownership)
         })
         .count()
-        + view.data_handler.upload_targets.brick_ownership.len()
+        + view
+            .data_handler
+            .upload_targets
+            .brick_ownership
+            .read()
+            .expect("Expected to be able to read brick ownership entries")
+            .len()
         + nodes_needed_overall;
     let rebuild_bricks = bricks_needed_overall > view.data_handler.bricks_in_view;
     if rebuild_bricks {
@@ -104,26 +114,6 @@ pub(crate) fn re_evaluate_view_size(view: &mut BoxTreeGPUView) {
     );
     view.resize = true;
 }
-
-//##############################################################################
-//    █████████  ███████████  █████  █████
-//   ███░░░░░███░░███░░░░░███░░███  ░░███
-//  ███     ░░░  ░███    ░███ ░███   ░███
-// ░███          ░██████████  ░███   ░███
-// ░███    █████ ░███░░░░░░   ░███   ░███
-// ░░███  ░░███  ░███         ░███   ░███
-//  ░░█████████  █████        ░░████████
-//   ░░░░░░░░░  ░░░░░          ░░░░░░░░
-
-//  █████   ███   █████ ███████████   █████ ███████████ ██████████
-// ░░███   ░███  ░░███ ░░███░░░░░███ ░░███ ░█░░░███░░░█░░███░░░░░█
-//  ░███   ░███   ░███  ░███    ░███  ░███ ░   ░███  ░  ░███  █ ░
-//  ░███   ░███   ░███  ░██████████   ░███     ░███     ░██████
-//  ░░███  █████  ███   ░███░░░░░███  ░███     ░███     ░███░░█
-//   ░░░█████░█████░    ░███    ░███  ░███     ░███     ░███ ░   █
-//     ░░███ ░░███      █████   █████ █████    █████    ██████████
-//      ░░░   ░░░      ░░░░░   ░░░░░ ░░░░░    ░░░░░    ░░░░░░░░░░
-//##############################################################################
 
 /// Converts the given array to `&[u8]` on the given range,
 /// and schedules it to be written to the given buffer in the GPU

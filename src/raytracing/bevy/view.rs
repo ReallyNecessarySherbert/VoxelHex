@@ -8,7 +8,7 @@ use crate::{
     raytracing::{
         bevy::{
             data::boxtree_properties,
-            types::{UploadQueueStatus, UploadQueueTargets},
+            types::{UploadQueuePopulation, UploadQueueStatus, UploadQueueTargets},
         },
         BoxTreeRenderData,
     },
@@ -26,7 +26,7 @@ use bevy::{
 };
 use bimap::BiHashMap;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     hash::Hash,
     sync::{Arc, RwLock},
 };
@@ -66,7 +66,10 @@ impl<
         resolution: [u32; 2],
         mut images: ResMut<Assets<Image>>,
     ) -> usize {
-        let tree = &self.tree;
+        let tree = &self
+            .tree
+            .read()
+            .expect("Expected to be able to read tree from GPU host");
 
         // This is an estimation for the required number of nodes in the given view
         // which sums the number of nodes within the viewport on every level
@@ -96,15 +99,15 @@ impl<
                 size: viewport.frustum.z,
             },
             render_data: BoxTreeRenderData {
-                mips_enabled: self.tree.mip_map_strategy.is_enabled(),
+                mips_enabled: tree.mip_map_strategy.is_enabled(),
                 boxtree_meta: BoxTreeMetaData {
-                    boxtree_size: self.tree.boxtree_size,
-                    tree_properties: boxtree_properties(&self.tree),
+                    boxtree_size: tree.boxtree_size,
+                    tree_properties: boxtree_properties(&tree),
                     ambient_light_color: V3c::new(1., 1., 1.),
                     ambient_light_position: V3c::new(
-                        self.tree.boxtree_size as f32,
-                        self.tree.boxtree_size as f32,
-                        self.tree.boxtree_size as f32,
+                        tree.boxtree_size as f32,
+                        tree.boxtree_size as f32,
+                        tree.boxtree_size as f32,
                     ),
                 },
                 node_metadata: vec![0; (nodes_in_view as f32 / 8.).ceil() as usize],
@@ -114,13 +117,11 @@ impl<
                 color_palette: vec![Vec4::ZERO; u16::MAX as usize],
             },
             upload_targets: UploadQueueTargets {
-                node_upload_queue: vec![],
-                brick_upload_queue: vec![],
-                brick_ownership: BiHashMap::new(),
+                population: UploadQueuePopulation::default(),
+                brick_ownership: Arc::default(),
                 brick_positions: vec![V3c::unit(0.); bricks_in_view],
                 node_key_vs_meta_index: BiHashMap::new(),
                 node_index_vs_parent: HashMap::new(),
-                nodes_to_see: HashSet::new(),
             },
             upload_state: UploadQueueStatus {
                 victim_node: 0,
@@ -129,6 +130,7 @@ impl<
                 brick_upload_progress: 0,
                 uploaded_color_palette_size: 0,
             },
+            pending_upload_queue_update: None,
             nodes_in_view,
             bricks_in_view,
             node_uploads_per_frame: 4,

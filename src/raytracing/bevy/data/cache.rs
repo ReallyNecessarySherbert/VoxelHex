@@ -165,6 +165,8 @@ impl BoxTreeGPUDataHandler {
                     if matches!(tree.node_mips[*child_key], BrickData::Parted(_)) {
                         self.upload_targets
                             .brick_ownership
+                            .write()
+                            .expect("Expected to be able to update brick ownership entries")
                             .remove_by_left(&(child_mip as usize));
                     }
                 }
@@ -181,6 +183,8 @@ impl BoxTreeGPUDataHandler {
                 if child_descriptor != empty_marker::<u32>() as usize {
                     self.upload_targets
                         .brick_ownership
+                        .write()
+                        .expect("Expected to be able to update brick ownership entries")
                         .remove_by_left(&{ brick_index });
                 }
             }
@@ -215,6 +219,7 @@ impl BoxTreeGPUDataHandler {
             if victim_node_key.is_none()
                 || !self
                     .upload_targets
+                    .population
                     .nodes_to_see
                     .contains(victim_node_key.unwrap())
             {
@@ -423,13 +428,16 @@ impl BoxTreeGPUDataHandler {
                             0x80000000 | voxel;
                     } else {
                         let node_entry = BrickOwnedBy::NodeAsChild(node_key as u32, sectant as u8);
-                        let brick_ownership = self
+                        let brick_ownership_entry = self
                             .upload_targets
                             .brick_ownership
-                            .get_by_right(&node_entry);
-                        if let Some(brick_index) = brick_ownership {
+                            .read()
+                            .expect("Expected to be able to read brick ownership entries")
+                            .get_by_right(&node_entry)
+                            .cloned();
+                        if let Some(brick_index) = brick_ownership_entry {
                             self.render_data.node_children[parent_first_child_index + sectant] =
-                                0x7FFFFFFF & *brick_index as u32;
+                                0x7FFFFFFF & brick_index as u32;
                         } else {
                             self.render_data.node_children[parent_first_child_index + sectant] =
                                 empty_marker::<u32>();
@@ -448,6 +456,8 @@ impl BoxTreeGPUDataHandler {
                 if let Some(brick_index) = self
                     .upload_targets
                     .brick_ownership
+                    .read()
+                    .expect("Expected to be able to read brick ownership entries")
                     .get_by_right(&BrickOwnedBy::NodeAsMIP(node_key as u32))
                 {
                     0x7FFFFFFF & *brick_index as u32
@@ -490,13 +500,15 @@ impl BoxTreeGPUDataHandler {
         let mut furthest_victim = None;
         let mut furthest_victim_distance = 0.;
         for victim_brick_index in victim_search_start..victim_search_end {
-            let brick_ownership = self
+            let brick_ownership_entry = self
                 .upload_targets
                 .brick_ownership
+                .read()
+                .expect("Expected to be able to read brick ownership entries")
                 .get_by_left(&victim_brick_index)
-                .unwrap_or(&BrickOwnedBy::None)
-                .clone();
-            match brick_ownership {
+                .cloned()
+                .unwrap_or(BrickOwnedBy::None);
+            match brick_ownership_entry {
                 BrickOwnedBy::None => {
                     // Unused brick slots have priority over far away bricks
                     priority_victim = Some(victim_brick_index);
@@ -509,7 +521,7 @@ impl BoxTreeGPUDataHandler {
                         .contains_left(&(node_key as usize)));
                     if
                         // in case the node is not inside the node upload list
-                        !self.upload_targets.nodes_to_see.contains(&(node_key as usize))
+                        !self.upload_targets.population.nodes_to_see.contains(&(node_key as usize))
                         // and the node have no children as bricks
                         && self.render_data.node_children.iter()
                             .skip(
@@ -567,6 +579,8 @@ impl BoxTreeGPUDataHandler {
                 let brick_ownership = self
                     .upload_targets
                     .brick_ownership
+                    .read()
+                    .expect("Expected to be able to read brick ownership entries")
                     .get_by_left(&victim_brick_index)
                     .unwrap_or(&BrickOwnedBy::None)
                     .clone();
@@ -580,6 +594,7 @@ impl BoxTreeGPUDataHandler {
                         // in case the node is not inside the node upload list, MIP can be erased
                         if !self
                             .upload_targets
+                            .population
                             .nodes_to_see
                             .contains(&(node_key as usize))
                         {
@@ -652,12 +667,15 @@ impl BoxTreeGPUDataHandler {
             BrickData::Empty => CacheUpdatePackage::default(),
             BrickData::Solid(_voxel) => unreachable!("Shouldn't try to upload solid bricks"),
             BrickData::Parted(brick) => {
-                let mut modified_nodes = match *self
+                let brick_ownership_entry = self
                     .upload_targets
                     .brick_ownership
+                    .read()
+                    .expect("Expected to be able to read brick ownership entries")
                     .get_by_left(&brick_index)
-                    .unwrap_or(&BrickOwnedBy::None)
-                {
+                    .cloned()
+                    .unwrap_or(BrickOwnedBy::None);
+                let mut modified_nodes = match brick_ownership_entry {
                     BrickOwnedBy::NodeAsChild(key, sectant) => {
                         if self
                             .upload_targets
@@ -728,6 +746,8 @@ impl BoxTreeGPUDataHandler {
                 self.upload_targets.brick_positions[brick_index] = brick_request.min_position;
                 self.upload_targets
                     .brick_ownership
+                    .write()
+                    .expect("Expected to be able to update brick ownership entries")
                     .insert(brick_index, brick_request.ownership);
 
                 debug_assert_eq!(

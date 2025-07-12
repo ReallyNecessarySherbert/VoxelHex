@@ -218,7 +218,7 @@ pub(crate) fn handle_model_load_finished(
                 });
             }
 
-            let mut host = BoxTreeGPUHost { tree: *tree };
+            let mut host = BoxTreeGPUHost::new(*tree);
             viewset.clear();
             let view_index = host.create_new_view(
                 &mut viewset,

@@ -98,7 +98,7 @@ fn setup(mut commands: Commands, images: ResMut<Assets<Image>>) {
         }
     }
 
-    let mut host = BoxTreeGPUHost { tree };
+    let mut host = BoxTreeGPUHost::new(tree);
     let mut views = VhxViewSet::new();
     let view_index = host.create_new_view(
         &mut views,
@@ -139,6 +139,10 @@ fn setup(mut commands: Commands, images: ResMut<Assets<Image>>) {
     ));
     commands.spawn(Camera2d::default());
     println!("Takes a while to create the compute pipeline, please hang on! Thanks");
+    #[cfg(debug_assertions)]
+    println!(
+        "WARNING! Example ran in debug mode, might take a while to load, and will be pretty slow.."
+    );
 }
 
 #[cfg(feature = "bevy_wgpu")]
@@ -221,7 +225,12 @@ fn handle_zoom(
                 use std::io::Write;
                 std::io::stdout().flush().ok().unwrap();
 
-                if let Some(hit) = tree.tree.get_by_ray(&ray) {
+                if let Some(hit) = tree
+                    .tree
+                    .read()
+                    .expect("Expected to be able to read Tree from GPU host")
+                    .get_by_ray(&ray)
+                {
                     let (data, _, normal) = hit;
                     //Because both vector should be normalized, the dot product should be 1*1*cos(angle)
                     //That means it is in range -1, +1, which should be accounted for

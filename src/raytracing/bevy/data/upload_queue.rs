@@ -8,8 +8,9 @@ use crate::{
     raytracing::bevy::{
         data::{boxtree_properties, re_evaluate_view_size, write_range_to_buffer},
         types::{
-            BoxTreeGPUHost, BrickOwnedBy, BrickUploadRequest, NodeUploadRequest,
-            UploadQueueTargets, VhxRenderPipeline, VhxViewSet,
+            BoxTreeGPUHost, BrickOwnedBy, BrickOwnership, BrickUploadRequest, NodeUploadRequest,
+            UploadQueuePopulation, UploadQueueTargets, UploadQueueUpdateTask, VhxRenderPipeline,
+            VhxViewSet,
         },
     },
     spatial::Cube,
@@ -17,20 +18,35 @@ use crate::{
 use bendy::{decoding::FromBencode, encoding::ToBencode};
 use bevy::{
     ecs::system::{Res, ResMut},
+    prelude::Commands,
     render::render_resource::encase::UniformBuffer,
+    tasks::{block_on, futures_lite::future, AsyncComputeTaskPool},
 };
 use std::hash::Hash;
 
 impl UploadQueueTargets {
     pub(crate) fn reset(&mut self) {
-        self.node_upload_queue.clear();
-        self.brick_upload_queue.clear();
-        self.brick_ownership.clear();
+        self.population.node_upload_queue.clear();
+        self.population.brick_upload_queue.clear();
+        self.population.nodes_to_see.clear();
+        self.brick_ownership
+            .write()
+            .expect("Expected to be able to clear brick ownersip entries")
+            .clear();
         self.node_key_vs_meta_index.clear();
-        self.nodes_to_see.clear();
     }
 }
 
+//##############################################################################
+//  ███████████   ██████████ ███████████  █████  █████ █████ █████       ██████████
+// ░░███░░░░░███ ░░███░░░░░█░░███░░░░░███░░███  ░░███ ░░███ ░░███       ░░███░░░░███
+//  ░███    ░███  ░███  █ ░  ░███    ░███ ░███   ░███  ░███  ░███        ░███   ░░███
+//  ░██████████   ░██████    ░██████████  ░███   ░███  ░███  ░███        ░███    ░███
+//  ░███░░░░░███  ░███░░█    ░███░░░░░███ ░███   ░███  ░███  ░███        ░███    ░███
+//  ░███    ░███  ░███ ░   █ ░███    ░███ ░███   ░███  ░███  ░███      █ ░███    ███
+//  █████   █████ ██████████ ███████████  ░░████████   █████ ███████████ ██████████
+// ░░░░░   ░░░░░ ░░░░░░░░░░ ░░░░░░░░░░░    ░░░░░░░░   ░░░░░ ░░░░░░░░░░░ ░░░░░░░░░░
+//##############################################################################
 /// Recreates the list of nodes and bricks to upload based on the current position and view distance
 pub(crate) fn rebuild<
     #[cfg(all(feature = "bytecode", feature = "serialization"))] T: FromBencode
@@ -50,13 +66,11 @@ pub(crate) fn rebuild<
     #[cfg(all(not(feature = "bytecode"), not(feature = "serialization")))] T: Default + Eq + Clone + Hash + VoxelData + Send + Sync + 'static,
 >(
     tree: &BoxTree<T>,
-    viewport_center_: &V3cf32,
+    viewport_center_: V3cf32,
     view_distance: f32,
-    upload_targets: &mut UploadQueueTargets,
-) {
-    upload_targets.nodes_to_see.clear();
-    upload_targets.brick_upload_queue.clear();
-    upload_targets.node_upload_queue.clear();
+    brick_ownership: BrickOwnership,
+) -> UploadQueuePopulation {
+    let mut queue_population = UploadQueuePopulation::default();
 
     // Determine view center range
     let viewport_center = V3c::new(
@@ -64,7 +78,7 @@ pub(crate) fn rebuild<
         viewport_center_.y.clamp(0., tree.boxtree_size as f32),
         viewport_center_.z.clamp(0., tree.boxtree_size as f32),
     );
-    let viewport_bl_ = *viewport_center_ - V3c::unit(view_distance / 2.);
+    let viewport_bl_ = viewport_center_ - V3c::unit(view_distance / 2.);
     let viewport_bl = V3c::new(
         viewport_bl_.x.clamp(0., tree.boxtree_size as f32),
         viewport_bl_.y.clamp(0., tree.boxtree_size as f32),
@@ -129,11 +143,11 @@ pub(crate) fn rebuild<
 
     // Add parent and children nodes into the upload queue and view set
     let center_node_key = node_stack.last().unwrap().node_key;
-    upload_targets.node_upload_queue.append(
+    queue_population.node_upload_queue.append(
         &mut node_stack
             .drain(..)
             .inspect(|v| {
-                upload_targets.nodes_to_see.insert(v.node_key);
+                queue_population.nodes_to_see.insert(v.node_key);
             })
             .collect(),
     );
@@ -144,9 +158,12 @@ pub(crate) fn rebuild<
         tree,
         &viewport_center,
         view_distance,
-        upload_targets,
         deepest_mip_level_to_upload,
+        &mut queue_population,
+        brick_ownership,
     );
+
+    queue_population
 }
 
 fn add_children_to_upload_queue<
@@ -170,8 +187,9 @@ fn add_children_to_upload_queue<
     tree: &BoxTree<T>,
     viewport_center: &V3c<f32>,
     view_distance: f32,
-    upload_targets: &mut UploadQueueTargets,
     min_mip_level: u32,
+    queue_population: &mut UploadQueuePopulation,
+    brick_ownership: BrickOwnership,
 ) {
     debug_assert!(min_mip_level >= 1);
     if node_mip_level < min_mip_level {
@@ -192,7 +210,7 @@ fn add_children_to_upload_queue<
     };
 
     debug_assert!(
-        upload_targets.nodes_to_see.contains(&node_key),
+        queue_population.nodes_to_see.contains(&node_key),
         "Expected node to be already included in the upload queue"
     );
 
@@ -210,21 +228,24 @@ fn add_children_to_upload_queue<
                     // while solid brickdata should be present in the nodes data
                 }
                 BrickData::Parted(_brick) => {
-                    let brick_ownership = BrickOwnedBy::NodeAsChild(node_key as u32, 0);
+                    let brick_ownership_entry = BrickOwnedBy::NodeAsChild(node_key as u32, 0);
                     if viewport_contains_target_fn(
                         &current_bl,
                         current_include_distance,
                         &V3c::from(node_bounds.min_position),
                         &V3c::unit(node_bounds.size as u32),
-                    ) && upload_targets
-                        .brick_ownership
-                        .get_by_right(&brick_ownership)
+                    ) && brick_ownership
+                        .read()
+                        .expect("Expected to be able to read brick ownership entries")
+                        .get_by_right(&brick_ownership_entry)
                         .is_none()
                     {
-                        upload_targets.brick_upload_queue.push(BrickUploadRequest {
-                            ownership: brick_ownership,
-                            min_position: node_bounds.min_position,
-                        });
+                        queue_population
+                            .brick_upload_queue
+                            .push(BrickUploadRequest {
+                                ownership: brick_ownership_entry,
+                                min_position: node_bounds.min_position,
+                            });
                     }
                 }
             };
@@ -244,7 +265,7 @@ fn add_children_to_upload_queue<
                             // while solid brickdata should be present in the nodes data
                         }
                         BrickData::Parted(_brick) => {
-                            let brick_ownership =
+                            let brick_ownership_entry =
                                 BrickOwnedBy::NodeAsChild(node_key as u32, target_child_sectant);
 
                             if viewport_contains_target_fn(
@@ -252,15 +273,18 @@ fn add_children_to_upload_queue<
                                 current_include_distance,
                                 &position_in_target,
                                 &update_size_in_target,
-                            ) && upload_targets
-                                .brick_ownership
-                                .get_by_right(&brick_ownership)
+                            ) && brick_ownership
+                                .read()
+                                .expect("Expected to be able to read brick ownership entries")
+                                .get_by_right(&brick_ownership_entry)
                                 .is_none()
                             {
-                                upload_targets.brick_upload_queue.push(BrickUploadRequest {
-                                    ownership: brick_ownership,
-                                    min_position: target_bounds.min_position,
-                                });
+                                queue_population
+                                    .brick_upload_queue
+                                    .push(BrickUploadRequest {
+                                        ownership: brick_ownership_entry,
+                                        min_position: target_bounds.min_position,
+                                    });
                             }
                         }
                     };
@@ -283,19 +307,20 @@ fn add_children_to_upload_queue<
                             &position_in_target,
                             &update_size_in_target,
                         ) {
-                            upload_targets.node_upload_queue.push(NodeUploadRequest {
+                            queue_population.node_upload_queue.push(NodeUploadRequest {
                                 node_key: child_key,
                                 parent_key: node_key,
                                 sectant: target_child_sectant,
                             });
-                            upload_targets.nodes_to_see.insert(child_key);
+                            queue_population.nodes_to_see.insert(child_key);
                             add_children_to_upload_queue(
                                 (child_key, target_bounds, node_mip_level - 1),
                                 tree,
                                 viewport_center,
                                 view_distance,
-                                upload_targets,
                                 min_mip_level,
+                                queue_population,
+                                brick_ownership.clone(), // It's cloning an Arc
                             );
                         }
                     }
@@ -305,7 +330,18 @@ fn add_children_to_upload_queue<
     }
 }
 
-pub(crate) fn handle_changes<
+//##############################################################################
+//  █████  █████ ███████████  █████          ███████      █████████   ██████████
+// ░░███  ░░███ ░░███░░░░░███░░███         ███░░░░░███   ███░░░░░███ ░░███░░░░███
+//  ░███   ░███  ░███    ░███ ░███        ███     ░░███ ░███    ░███  ░███   ░░███
+//  ░███   ░███  ░██████████  ░███       ░███      ░███ ░███████████  ░███    ░███
+//  ░███   ░███  ░███░░░░░░   ░███       ░███      ░███ ░███░░░░░███  ░███    ░███
+//  ░███   ░███  ░███         ░███      █░░███     ███  ░███    ░███  ░███    ███
+//  ░░████████   █████        ███████████ ░░░███████░   █████   █████ ██████████
+//   ░░░░░░░░   ░░░░░        ░░░░░░░░░░░    ░░░░░░░    ░░░░░   ░░░░░ ░░░░░░░░░░
+//##############################################################################
+/// Continually upload node and brick data to GPU
+pub(crate) fn upload<
     #[cfg(all(feature = "bytecode", feature = "serialization"))] T: FromBencode
         + ToBencode
         + Serialize
@@ -322,9 +358,11 @@ pub(crate) fn handle_changes<
     #[cfg(all(not(feature = "bytecode"), feature = "serialization"))] T: Serialize + DeserializeOwned + Default + Eq + Clone + Hash + VoxelData + Send + Sync + 'static,
     #[cfg(all(not(feature = "bytecode"), not(feature = "serialization")))] T: Default + Eq + Clone + Hash + VoxelData + Send + Sync + 'static,
 >(
+    mut commands: Commands,
+    mut viewset: Option<ResMut<VhxViewSet>>,
     tree_gpu_host: Option<Res<BoxTreeGPUHost<T>>>,
     mut vhx_pipeline: Option<ResMut<VhxRenderPipeline>>,
-    mut viewset: Option<ResMut<VhxViewSet>>,
+    mut upload_queue_update: Option<ResMut<UploadQueueUpdateTask>>,
 ) {
     let (Some(pipeline), Some(tree_host), Some(viewset)) = (
         vhx_pipeline.as_mut(),
@@ -338,152 +376,225 @@ pub(crate) fn handle_changes<
         return; // Nothing to do without views..
     }
 
+    let tree = tree_host
+        .tree
+        .read()
+        .expect("Expected to be able to read tree from GPU host");
     let mut view = viewset.view_mut(0).unwrap();
     let mut updates = vec![];
 
     #[allow(clippy::reversed_empty_ranges)]
     let mut ocbits_updated = usize::MAX..0;
 
-    'uploading_buffers: {
-        // Decide upload targets
+    // Decide target nodes/bricks to upload
+    'upload_queue_update: {
         if view.reload {
-            rebuild::<T>(
-                &tree_host.tree,
-                &view.spyglass.viewport.origin.clone(),
-                view.spyglass.viewport.frustum.z,
-                &mut view.data_handler.upload_targets,
-            );
-
-            view.data_handler.upload_state.node_upload_progress = 0;
-            view.data_handler.upload_state.brick_upload_progress = 0;
-
+            // rebuild upload queue if not already in progress
+            if upload_queue_update.is_none() {
+                let thread_pool = AsyncComputeTaskPool::get();
+                let viewport_center = view.spyglass.viewport.origin.clone();
+                let viewing_distance = view.spyglass.viewport.frustum.z;
+                let brick_ownership = view.data_handler.upload_targets.brick_ownership.clone();
+                let tree_arc = tree_host.tree.clone();
+                commands.insert_resource(UploadQueueUpdateTask(thread_pool.spawn(async move {
+                    rebuild::<T>(
+                        &tree_arc
+                            .read()
+                            .expect("Expected to be able to read tree from GPU host"),
+                        viewport_center,
+                        viewing_distance,
+                        brick_ownership,
+                    )
+                })));
+            }
             view.reload = false;
+            return; // No need to upload anything else in this loop
         }
 
-        // Upload targets if view is ready
-        if !view.reload {
-            let data_handler = &mut view.data_handler;
+        // If the upload queue update task is finished apply it!
+        if let Some(ref mut upload_queue_update) = upload_queue_update {
+            if let Some(population) = block_on(future::poll_once(&mut upload_queue_update.0)) {
+                view.data_handler.upload_targets.population = population;
+                view.data_handler.upload_state.node_upload_progress = 0;
+                view.data_handler.upload_state.brick_upload_progress = 0;
+                commands.remove_resource::<UploadQueueUpdateTask>();
+            }
+        }
 
-            debug_assert!(
-                data_handler.upload_state.node_upload_progress
-                    <= data_handler.upload_targets.node_upload_queue.len()
-            );
+        // Initiate pending update opertaion if there's any, but continue with uploads
+        if let Some((viewport_center, viewing_distance)) =
+            view.data_handler.pending_upload_queue_update
+        {
+            let thread_pool = AsyncComputeTaskPool::get();
+            let brick_ownership = view.data_handler.upload_targets.brick_ownership.clone();
+            let tree_arc = tree_host.tree.clone();
+            commands.insert_resource(UploadQueueUpdateTask(thread_pool.spawn(async move {
+                rebuild::<T>(
+                    &tree_arc
+                        .read()
+                        .expect("Expected to be able to read tree from GPU host"),
+                    viewport_center,
+                    viewing_distance,
+                    brick_ownership,
+                )
+            })));
+            view.data_handler.pending_upload_queue_update = None;
+        }
 
-            // Handle node uploads
-            for _ in 0..data_handler.node_uploads_per_frame.min(
-                data_handler.upload_targets.node_upload_queue.len()
-                    - data_handler.upload_state.node_upload_progress,
-            ) {
-                // find first node to upload
-                while data_handler.upload_state.node_upload_progress
-                    < data_handler.upload_targets.node_upload_queue.len()
+        // Decide on targets to upload this loop
+        let data_handler = &mut view.data_handler;
+
+        debug_assert!(
+            data_handler.upload_state.node_upload_progress
+                <= data_handler
+                    .upload_targets
+                    .population
+                    .node_upload_queue
+                    .len()
+        );
+
+        // Handle node uploads
+        for _ in 0..data_handler.node_uploads_per_frame.min(
+            data_handler
+                .upload_targets
+                .population
+                .node_upload_queue
+                .len()
+                - data_handler.upload_state.node_upload_progress,
+        ) {
+            // find first node to upload
+            while data_handler.upload_state.node_upload_progress
+                < data_handler
+                    .upload_targets
+                    .population
+                    .node_upload_queue
+                    .len()
+            {
+                let node_upload_request = data_handler.upload_targets.population.node_upload_queue
+                    [data_handler.upload_state.node_upload_progress]
+                    .clone();
+
+                if let Some(node_meta_index) = data_handler
+                    .upload_targets
+                    .node_key_vs_meta_index
+                    .get_by_left(&node_upload_request.node_key)
+                    .cloned()
                 {
-                    let node_upload_request = data_handler.upload_targets.node_upload_queue
-                        [data_handler.upload_state.node_upload_progress]
-                        .clone();
-
-                    if let Some(node_meta_index) = data_handler
-                        .upload_targets
-                        .node_key_vs_meta_index
-                        .get_by_left(&node_upload_request.node_key)
-                        .cloned()
+                    // Skip to next node if the current node is already uploaded
+                    if matches!(
+                        tree.node_mips[node_upload_request.node_key],
+                        BrickData::Parted(_)
+                    ) && data_handler.render_data.node_mips[node_meta_index]
+                        == empty_marker::<u32>()
                     {
-                        // Skip to next node if the current node is already uploaded
-                        if matches!(
-                            tree_host.tree.node_mips[node_upload_request.node_key],
-                            BrickData::Parted(_)
-                        ) && data_handler.render_data.node_mips[node_meta_index]
-                            == empty_marker::<u32>()
-                        {
-                            // Upload MIP again, if not present already
-                            let mip_update = data_handler.add_brick(
-                                &tree_host.tree,
-                                BrickUploadRequest {
-                                    ownership: BrickOwnedBy::NodeAsMIP(
-                                        node_upload_request.node_key as u32,
-                                    ),
-                                    min_position: V3c::default(),
-                                },
-                            );
-                            if mip_update.allocation_failed {
-                                // Can't fit new mip brick into buffers, need to rebuild the pipeline
-                                re_evaluate_view_size(&mut view);
-                                break 'uploading_buffers; // voxel data still needs to be written out
-                            }
-                            updates.push(mip_update);
+                        // Upload MIP again, if not present already
+                        let mip_update = data_handler.add_brick(
+                            &tree,
+                            BrickUploadRequest {
+                                ownership: BrickOwnedBy::NodeAsMIP(
+                                    node_upload_request.node_key as u32,
+                                ),
+                                min_position: V3c::default(),
+                            },
+                        );
+                        if mip_update.allocation_failed {
+                            // Can't fit new mip brick into buffers, need to rebuild the pipeline
+                            re_evaluate_view_size(&mut view);
+                            break 'upload_queue_update; // voxel data still needs to be written out
                         }
-
-                        data_handler.upload_state.node_upload_progress += 1;
-                        continue;
+                        updates.push(mip_update);
                     }
-
-                    // Upload Node to GPU
-                    let (new_node_index, new_node_update) =
-                        data_handler.add_node(&tree_host.tree, &node_upload_request);
-
-                    if new_node_update.allocation_failed {
-                        // Can't fit new brick into buffers, need to rebuild the pipeline
-                        re_evaluate_view_size(&mut view);
-                        break 'uploading_buffers; // voxel data still needs to be written out
-                    }
-                    updates.push(new_node_update);
-
-                    // Upload MIP to GPU
-                    let mip_update = data_handler.add_brick(
-                        &tree_host.tree,
-                        BrickUploadRequest {
-                            ownership: BrickOwnedBy::NodeAsMIP(node_upload_request.node_key as u32),
-                            min_position: V3c::unit(0.), // min_position not used for MIPs
-                        },
-                    );
-
-                    if mip_update.allocation_failed {
-                        // Can't fit new MIP brick into buffers, need to rebuild the pipeline
-                        re_evaluate_view_size(&mut view);
-                        break 'uploading_buffers; // voxel data still needs to be written out
-                    }
-                    updates.push(mip_update);
-
-                    // Also set the ocbits updated range
-                    ocbits_updated.start = ocbits_updated.start.min(new_node_index * 2);
-                    ocbits_updated.end = ocbits_updated.end.max(new_node_index * 2 + 2);
 
                     data_handler.upload_state.node_upload_progress += 1;
-                    break;
+                    continue;
                 }
-                if data_handler.upload_state.node_upload_progress
-                    == data_handler.upload_targets.node_upload_queue.len()
-                {
-                    // No more nodes to upload!
-                    break;
-                }
-            }
 
-            // Handle brick uploads
-            if data_handler.upload_state.brick_upload_progress
-                == data_handler.upload_targets.brick_upload_queue.len()
-            {
-                break 'uploading_buffers; // All bricks are already uploaded
-            }
-            for _ in 0..data_handler.brick_uploads_per_frame {
-                debug_assert!(
-                    data_handler.upload_state.brick_upload_progress
-                        < data_handler.upload_targets.brick_upload_queue.len()
+                // Upload Node to GPU
+                let (new_node_index, new_node_update) =
+                    data_handler.add_node(&tree, &node_upload_request);
+
+                if new_node_update.allocation_failed {
+                    // Can't fit new brick into buffers, need to rebuild the pipeline
+                    re_evaluate_view_size(&mut view);
+                    break 'upload_queue_update; // voxel data still needs to be written out
+                }
+                updates.push(new_node_update);
+
+                // Upload MIP to GPU
+                let mip_update = data_handler.add_brick(
+                    &tree,
+                    BrickUploadRequest {
+                        ownership: BrickOwnedBy::NodeAsMIP(node_upload_request.node_key as u32),
+                        min_position: V3c::unit(0.), // min_position not used for MIPs
+                    },
                 );
 
-                // find a brick to upload
-                for brick_request_index in data_handler.upload_state.brick_upload_progress
-                    ..data_handler.upload_targets.brick_upload_queue.len()
-                {
-                    let brick_request =
-                        data_handler.upload_targets.brick_upload_queue[brick_request_index].clone();
-                    let brick_ownership = brick_request.ownership.clone();
+                if mip_update.allocation_failed {
+                    // Can't fit new MIP brick into buffers, need to rebuild the pipeline
+                    re_evaluate_view_size(&mut view);
+                    break 'upload_queue_update; // voxel data still needs to be written out
+                }
+                updates.push(mip_update);
 
-                    if
-                    // current brick is not uploaded
-                    data_handler
+                // Also set the ocbits updated range
+                ocbits_updated.start = ocbits_updated.start.min(new_node_index * 2);
+                ocbits_updated.end = ocbits_updated.end.max(new_node_index * 2 + 2);
+
+                data_handler.upload_state.node_upload_progress += 1;
+                break;
+            }
+            if data_handler.upload_state.node_upload_progress
+                == data_handler
+                    .upload_targets
+                    .population
+                    .node_upload_queue
+                    .len()
+            {
+                // No more nodes to upload!
+                break;
+            }
+        }
+
+        // Handle brick uploads
+        if data_handler.upload_state.brick_upload_progress
+            == data_handler
+                .upload_targets
+                .population
+                .brick_upload_queue
+                .len()
+        {
+            break 'upload_queue_update; // All bricks are already uploaded
+        }
+        for _ in 0..data_handler.brick_uploads_per_frame {
+            debug_assert!(
+                data_handler.upload_state.brick_upload_progress
+                    < data_handler
+                        .upload_targets
+                        .population
+                        .brick_upload_queue
+                        .len()
+            );
+
+            // find a brick to upload
+            for brick_request_index in data_handler.upload_state.brick_upload_progress
+                ..data_handler
+                    .upload_targets
+                    .population
+                    .brick_upload_queue
+                    .len()
+            {
+                let brick_request = data_handler.upload_targets.population.brick_upload_queue
+                    [brick_request_index]
+                    .clone();
+                let brick_ownership = brick_request.ownership.clone();
+
+                if
+                // current brick is not uploaded
+                data_handler
                         .upload_targets
                         .brick_ownership
+                        .read()
+                        .expect("Expected to be able to read brick ownership entries")
                         .get_by_right(&brick_request.ownership)
                         .is_none()
                         // current brick can be uploaded
@@ -493,42 +604,51 @@ pub(crate) fn handle_changes<
                                 // Brick can be uploaded if its parent is already uploaded to the GPU
                                  data_handler.upload_targets.node_key_vs_meta_index.contains_left(&(node_key as usize))
                                  // Brick should be uploaded if its parent also needs to be uploaded to GPU
-                                 && data_handler.upload_targets.nodes_to_see.contains(&(node_key as usize))
+                                 && data_handler.upload_targets.population.nodes_to_see.contains(&(node_key as usize))
                             }
                         }
+                {
+                    let brick_update = data_handler.add_brick(&tree, brick_request);
+                    if brick_update.allocation_failed {
+                        // Can't fit new brick into buffers, need to rebuild the pipeline
+                        re_evaluate_view_size(&mut view);
+                        break 'upload_queue_update; // voxel data still needs to be written out
+                    }
+                    updates.push(brick_update);
+                } else {
+                    if brick_request_index
+                        == data_handler
+                            .upload_targets
+                            .population
+                            .brick_upload_queue
+                            .len()
                     {
-                        let brick_update = data_handler.add_brick(&tree_host.tree, brick_request);
-                        if brick_update.allocation_failed {
-                            // Can't fit new brick into buffers, need to rebuild the pipeline
-                            re_evaluate_view_size(&mut view);
-                            break 'uploading_buffers; // voxel data still needs to be written out
-                        }
-                        updates.push(brick_update);
-                    } else {
-                        if brick_request_index
-                            == data_handler.upload_targets.brick_upload_queue.len()
-                        {
-                            break 'uploading_buffers; // Can't upload more bricks this loop
-                        }
-                        continue;
+                        break 'upload_queue_update; // Can't upload more bricks this loop
                     }
-
-                    // In case current brick request is uploaded already, just increase progress
-                    debug_assert!(data_handler
-                        .upload_targets
-                        .brick_ownership
-                        .get_by_right(&brick_ownership)
-                        .is_some());
-                    if brick_request_index == data_handler.upload_state.brick_upload_progress {
-                        data_handler.upload_state.brick_upload_progress += 1;
-                        if data_handler.upload_state.brick_upload_progress
-                            == data_handler.upload_targets.brick_upload_queue.len()
-                        {
-                            break 'uploading_buffers; // No more bricks to upload
-                        }
-                    }
-                    break;
+                    continue;
                 }
+
+                // In case current brick request is uploaded already, just increase progress
+                debug_assert!(data_handler
+                    .upload_targets
+                    .brick_ownership
+                    .read()
+                    .expect("Expected to be able to read brick ownership entries")
+                    .get_by_right(&brick_ownership)
+                    .is_some());
+                if brick_request_index == data_handler.upload_state.brick_upload_progress {
+                    data_handler.upload_state.brick_upload_progress += 1;
+                    if data_handler.upload_state.brick_upload_progress
+                        == data_handler
+                            .upload_targets
+                            .population
+                            .brick_upload_queue
+                            .len()
+                    {
+                        break 'upload_queue_update; // No more bricks to upload
+                    }
+                }
+                break;
             }
         }
     }
@@ -554,10 +674,9 @@ pub(crate) fn handle_changes<
     }
 
     // Data updates for BoxTree MIP map feature
-    let tree = &tree_host.tree;
     if view.data_handler.render_data.mips_enabled != tree.mip_map_strategy.is_enabled() {
         // Regenerate feature bits
-        view.data_handler.render_data.boxtree_meta.tree_properties = boxtree_properties(tree);
+        view.data_handler.render_data.boxtree_meta.tree_properties = boxtree_properties(&tree);
 
         // Write to GPU
         let mut buffer = UniformBuffer::new(Vec::<u8>::new());
