@@ -37,13 +37,14 @@ pub enum BoxTreeEntry<'a, T: VoxelData> {
 }
 
 /// Data representation for a matrix of voxels
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq)]
 #[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
 pub(crate) enum BrickData<T>
 where
     T: Clone + PartialEq + Clone,
 {
     /// Brick is empty
+    #[default]
     Empty,
 
     /// Brick is an NxNxN matrix, size is determined by the parent entity
@@ -63,8 +64,8 @@ where
     #[default]
     Nothing,
 
-    /// Internal node + cache data to store the occupancy of the enclosed nodes
-    Internal(u64),
+    /// Internal node
+    Internal,
 
     /// Node contains 8 children, each with their own brickdata
     Leaf([BrickData<T>; BOX_NODE_CHILDREN_COUNT]),
@@ -73,13 +74,12 @@ where
     UniformLeaf(BrickData<T>),
 }
 
-#[derive(Default, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
 pub(crate) enum NodeChildren<T: Default> {
     #[default]
     NoChildren,
     Children([T; BOX_NODE_CHILDREN_COUNT]),
-    OccupancyBitmap(u64), // In case of leaf nodes
 }
 
 /// Trait for User Defined Voxel Data
@@ -99,8 +99,6 @@ pub struct Albedo {
 }
 
 pub(crate) type PaletteIndexValues = u32;
-pub(crate) type NodeData = NodeContent<PaletteIndexValues>;
-pub(crate) type NodeConnection = NodeChildren<u32>;
 pub type OctreeMIPMapStrategy = HashMap<usize, MIPResamplingMethods>;
 
 /// Implemented methods for MIP sampling. Default is set for
@@ -161,6 +159,22 @@ pub struct MIPMapStrategy {
     pub(crate) resampling_color_matching_thresholds: HashMap<usize, f32>,
 }
 
+/// Data of nodes within a BoxTree
+#[derive(Debug, Default, Clone)]
+pub(crate) struct NodeData {
+    /// Type and content information of the node
+    pub(crate) content: NodeContent<PaletteIndexValues>,
+
+    /// Node Child Connections
+    pub(crate) children: NodeChildren<u32>,
+
+    /// Brick data for each node containing a simplified representation, or all empties if the feature is disabled
+    pub(crate) mip: BrickData<PaletteIndexValues>,
+
+    /// Occupancy information of children on the bit-level
+    pub(crate) occupied_bits: u64,
+}
+
 /// Sparse 64Tree of Voxel Bricks, where each leaf node contains a brick of voxels.
 /// A Brick is a 3 dimensional matrix, each element of it containing a voxel.
 /// A Brick can be indexed directly, as opposed to the boxtree which is essentially a
@@ -180,16 +194,13 @@ where
     /// Storing data at each position through palette index values
     pub(crate) nodes: ObjectPool<NodeData>,
 
-    /// Node Connections
-    pub(crate) node_children: Vec<NodeConnection>,
-
-    /// Brick data for each node containing a simplified representation, or all empties if the feature is disabled
-    pub(crate) node_mips: Vec<BrickData<PaletteIndexValues>>,
-
     /// The albedo colors used by the boxtree. Maximum 65535 colors can be used at once
-    /// because of a limitation on GPU raytracing, to spare space index values refering the palettes
-    /// are stored on 2 Bytes
+    /// because of a limitation on GPU raytracing, to spare space index values refering
+    /// the palettes are stored on 2 Bytes
     pub(crate) voxel_color_palette: Vec<Albedo>, // referenced by @nodes
+
+    /// The different instances of user data stored within the boxtree
+    /// Not sent to GPU
     pub(crate) voxel_data_palette: Vec<T>, // referenced by @nodes
 
     /// Cache variable to help find colors inside the color palette

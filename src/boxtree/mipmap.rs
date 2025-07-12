@@ -81,19 +81,19 @@ impl<
             };
 
         // determine the sampling range
-        let (sample_start, sample_size) = match self.nodes.get(node_key) {
+        let (sample_start, sample_size) = match &self.nodes.get(node_key).content {
             NodeContent::Nothing => {
                 debug_assert!(
-                    matches!(self.node_children[node_key], NodeChildren::NoChildren),
+                    matches!(self.nodes.get(node_key).children, NodeChildren::NoChildren),
                     "Expected empty node to not have children: {:?}",
-                    self.node_children[node_key]
+                    self.nodes.get(node_key).children
                 );
                 return;
             }
             NodeContent::UniformLeaf(_brick) => {
-                if !matches!(self.node_mips[node_key], BrickData::Empty) {
+                if !matches!(self.nodes.get(node_key).mip, BrickData::Empty) {
                     //Uniform Leaf nodes need not a MIP, because their content is equivalent with it
-                    self.node_mips[node_key] = BrickData::Empty;
+                    self.nodes.get_mut(node_key).mip = BrickData::Empty;
                 }
                 return;
             }
@@ -135,7 +135,7 @@ impl<
                 );
                 (sample_start, sample_size)
             }
-            NodeContent::Internal(_) if dominant_bottom => {
+            NodeContent::Internal if dominant_bottom => {
                 let sample_size = node_bounds.size as u32 / self.brick_dim;
                 let sample_start = V3c::from(*position - (*position % sample_size));
                 let sample_start: V3c<u32> = sample_start.floor().into();
@@ -168,7 +168,7 @@ impl<
                 );
                 (sample_start, sample_size)
             }
-            NodeContent::Internal(_occupied_bits) => {
+            NodeContent::Internal => {
                 let sample_size = BOX_NODE_DIMENSION as u32;
                 let pos_in_bounds = V3c::from(*position) - node_bounds.min_position;
                 let sample_start_v1 =
@@ -202,7 +202,7 @@ impl<
             }
         };
 
-        let sampled_color = match self.nodes.get(node_key) {
+        let sampled_color = match self.nodes.get(node_key).content {
             NodeContent::Nothing | NodeContent::UniformLeaf(_) => None,
             NodeContent::Leaf(_) => {
                 sampler.execute(&sample_start, sample_size, |pos| -> Option<Albedo> {
@@ -215,7 +215,7 @@ impl<
                     .copied()
                 })
             }
-            NodeContent::Internal(_occupied_bits) if dominant_bottom => {
+            NodeContent::Internal if dominant_bottom => {
                 sampler.execute(&sample_start, sample_size, |pos| -> Option<Albedo> {
                     NodeContent::pix_get_ref(
                         &self.get_internal(node_key, *node_bounds, pos),
@@ -226,7 +226,7 @@ impl<
                     .copied()
                 })
             }
-            NodeContent::Internal(_occupied_bits) => {
+            NodeContent::Internal => {
                 sampler.execute(
                     &sample_start,
                     sample_size,
@@ -242,7 +242,7 @@ impl<
                         );
 
                         if empty_marker::<u32>() as usize
-                            == self.node_children[node_key].child(child_sectant)
+                            == self.nodes.get(node_key).child(child_sectant)
                         {
                             return None;
                         }
@@ -251,8 +251,10 @@ impl<
                             - SECTANT_OFFSET_LUT[child_sectant as usize]
                                 * (self.brick_dim * BOX_NODE_DIMENSION as u32) as f32;
 
-                        let sample = match &self.node_mips
-                            [self.node_children[node_key].child(child_sectant)]
+                        let sample = match &self
+                            .nodes
+                            .get(self.nodes.get(node_key).child(child_sectant))
+                            .mip
                         {
                             BrickData::Empty => None,
                             BrickData::Solid(voxel) => NodeContent::pix_get_ref(
@@ -330,17 +332,17 @@ impl<
                 pos_in_mip.z,
                 self.brick_dim as usize,
             );
-            match &mut self.node_mips[node_key] {
+            match &mut self.nodes.get_mut(node_key).mip {
                 BrickData::Empty => {
                     let mut new_brick_data =
                         vec![empty_marker::<PaletteIndexValues>(); self.brick_dim.pow(3) as usize];
                     new_brick_data[flat_pos_in_mip] = mip_entry;
-                    self.node_mips[node_key] = BrickData::Parted(new_brick_data);
+                    self.nodes.get_mut(node_key).mip = BrickData::Parted(new_brick_data);
                 }
                 BrickData::Solid(voxel) => {
                     let mut new_brick_data = vec![*voxel; self.brick_dim.pow(3) as usize];
                     new_brick_data[flat_pos_in_mip] = mip_entry;
-                    self.node_mips[node_key] = BrickData::Parted(new_brick_data);
+                    self.nodes.get_mut(node_key).mip = BrickData::Parted(new_brick_data);
                 }
                 BrickData::Parted(brick) => {
                     brick[flat_pos_in_mip] = mip_entry;
@@ -568,9 +570,7 @@ impl<
     //####################################################################################
     /// Recalculates MIPs for the whole content of the boxtree
     pub fn recalculate_mips(&mut self) {
-        self.0.node_mips = vec![BrickData::Empty; self.0.nodes.len()];
-
-        // Generating MIPMAPs need to happen while traveling the graph in a DFS manner
+        // Generating MIPs need to happen while traveling the graph in a DFS manner
         // in order to generate MIPs for the leaf nodes first
         let mut node_stack = vec![(
             BoxTree::<T>::ROOT_NODE_KEY as usize,
@@ -591,22 +591,16 @@ impl<
                 continue;
             }
 
-            match tree.nodes.get(*current_node_key) {
+            match tree.nodes.get(*current_node_key).content {
                 NodeContent::Nothing => unreachable!("BFS shouldn't evaluate empty children"),
-                NodeContent::Internal(_occupied_bits) => {
-                    let target_child_key =
-                        tree.node_children[*current_node_key].child(*target_sectant);
+                NodeContent::Internal => {
+                    let target_child_key = tree.nodes.get(*current_node_key).child(*target_sectant);
                     if tree.nodes.key_is_valid(target_child_key)
-                        && !matches!(tree.nodes.get(target_child_key), NodeContent::Nothing)
+                        && !matches!(
+                            tree.nodes.get(target_child_key).content,
+                            NodeContent::Nothing
+                        )
                     {
-                        debug_assert!(
-                            matches!(
-                                tree.node_children[target_child_key],
-                                NodeChildren::OccupancyBitmap(_) | NodeChildren::Children(_)
-                            ),
-                            "Expected node[{}] child[{}] to have children or occupancy instead of: {:?}",
-                            current_node_key, target_sectant, tree.node_children[target_child_key]
-                        );
                         node_stack.push((
                             target_child_key,
                             current_bounds.child_bounds_for(*target_sectant),
@@ -617,15 +611,6 @@ impl<
                     }
                 }
                 NodeContent::Leaf(_) | NodeContent::UniformLeaf(_) => {
-                    debug_assert!(
-                        matches!(
-                            tree.node_children[*current_node_key],
-                            NodeChildren::OccupancyBitmap(_)
-                        ),
-                        "Expected node[{}] to have occupancy bitmaps instead of: {:?}",
-                        current_node_key,
-                        tree.node_children[*current_node_key]
-                    );
                     // Set current child iterator to OOB, to evaluate it and move on
                     node_stack.last_mut().unwrap().2 = BOX_NODE_CHILDREN_COUNT as u8;
                 }
@@ -643,7 +628,7 @@ impl<
         // and if there's anything to iterate into
         if tree.mip_map_strategy.enabled
             && mips_on_previously != enabled
-            && *tree.nodes.get(BoxTree::<T>::ROOT_NODE_KEY as usize) != NodeContent::Nothing
+            && tree.nodes.get(BoxTree::<T>::ROOT_NODE_KEY as usize).content != NodeContent::Nothing
         {
             self.recalculate_mips();
         }
@@ -657,6 +642,7 @@ impl<
             return;
         }
 
+        tree.nodes.get_mut(node_key).mip = BrickData::Empty;
         for x in 0..tree.brick_dim {
             for y in 0..tree.brick_dim {
                 for z in 0..tree.brick_dim {
@@ -679,13 +665,15 @@ impl<
         let node_key: usize = if BOX_NODE_CHILDREN_COUNT <= sectant as usize {
             BoxTree::<T>::ROOT_NODE_KEY as usize
         } else {
-            tree.node_children[BoxTree::<T>::ROOT_NODE_KEY as usize].child(sectant) as usize
+            tree.nodes
+                .get(BoxTree::<T>::ROOT_NODE_KEY as usize)
+                .child(sectant) as usize
         };
 
         if !tree.nodes.key_is_valid(node_key) {
             return BoxTreeEntry::Empty;
         }
-        match &tree.node_mips[node_key] {
+        match &tree.nodes.get(node_key).mip {
             BrickData::Empty => BoxTreeEntry::Empty,
             BrickData::Solid(voxel) => NodeContent::pix_get_ref(
                 &voxel,

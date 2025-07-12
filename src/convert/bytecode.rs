@@ -261,7 +261,7 @@ where
     fn encode(&self, encoder: SingleItemEncoder) -> Result<(), BencodeError> {
         match self {
             NodeContent::Nothing => encoder.emit_str("#"),
-            NodeContent::Internal(occupied_bits) => encoder.emit_list(|e| {
+            NodeContent::Internal => encoder.emit_list(|e| {
                 e.emit_str("##")?;
                 e.emit_int(*occupied_bits)
             }),

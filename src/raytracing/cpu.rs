@@ -340,22 +340,18 @@ impl<
             node_stack.push(Self::ROOT_NODE_KEY);
             while let Some(node_stack_last) = node_stack.last() {
                 let current_node_occupied_bits =
-                    self.stored_occupied_bits(*node_stack_last as usize);
+                    self.nodes.get(*node_stack_last as usize).occupied_bits;
                 debug_assert!(self.nodes.key_is_valid(*node_stack_last as usize));
 
                 let mut do_backtrack_after_leaf_miss = matches!(
-                    self.nodes.get(current_node_key),
+                    self.nodes.get(current_node_key).content,
                     NodeContent::UniformLeaf(_)
                 );
 
                 // Probe bricks in leaf nodes if target not out of bounds
                 if (target_sectant as usize) < BOX_NODE_CHILDREN_COUNT {
-                    match self.nodes.get(current_node_key) {
+                    match &self.nodes.get(current_node_key).content {
                         NodeContent::UniformLeaf(brick) => {
-                            debug_assert!(matches!(
-                                self.node_children[current_node_key],
-                                NodeChildren::OccupancyBitmap(_)
-                            ));
                             if let Some(hit) = self.probe_brick(
                                 ray,
                                 &mut ray_current_point,
@@ -368,10 +364,6 @@ impl<
                             do_backtrack_after_leaf_miss = true;
                         }
                         NodeContent::Leaf(bricks) => {
-                            debug_assert!(matches!(
-                                self.node_children[current_node_key],
-                                NodeChildren::OccupancyBitmap(_)
-                            ));
                             if let Some(hit) = self.probe_brick(
                                 ray,
                                 &mut ray_current_point,
@@ -382,7 +374,7 @@ impl<
                                 return Some(hit);
                             }
                         }
-                        NodeContent::Internal(_) | NodeContent::Nothing => {}
+                        NodeContent::Internal | NodeContent::Nothing => {}
                     }
                 };
 
@@ -421,12 +413,14 @@ impl<
                               // Eliminating this `continue` causes significant slowdown in GPU?!
                 }
 
-                if matches!(self.nodes.get(current_node_key), NodeContent::Internal(_))
-                    && 0 != (current_node_occupied_bits & (0x01 << target_sectant))
+                if matches!(
+                    self.nodes.get(current_node_key).content,
+                    NodeContent::Internal
+                ) && 0 != (current_node_occupied_bits & (0x01 << target_sectant))
                 {
                     // PUSH
                     let target_child_key =
-                        self.node_children[current_node_key].child(target_sectant) as u32;
+                        self.nodes.get(current_node_key).child(target_sectant) as u32;
                     current_node_key = target_child_key as usize;
                     current_bounds = target_bounds;
                     target_sectant = offset_sectant(

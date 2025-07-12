@@ -43,7 +43,7 @@ impl BoxTreeGPUDataHandler {
     {
         // set node type
         match tree.nodes.get(node_key) {
-            NodeContent::Internal(_) | NodeContent::Nothing => {
+            NodeContent::Internal | NodeContent::Nothing => {
                 meta_array[node_index / 8] &= !(0x01 << (node_index % 8));
                 meta_array[node_index / 8] &= !(0x01 << (8 + (node_index % 8)));
             }
@@ -133,7 +133,7 @@ impl BoxTreeGPUDataHandler {
             NodeContent::Nothing => {
                 panic!("HOW DO I ERASE NOTHING. AMERICA EXPLAIN")
             }
-            NodeContent::Internal(_) | NodeContent::Leaf(_) | NodeContent::UniformLeaf(_) => {
+            NodeContent::Internal | NodeContent::Leaf(_) | NodeContent::UniformLeaf(_) => {
                 self.render_data.node_children[parent_children_offset] = empty_marker::<u32>();
             }
         }
@@ -142,7 +142,7 @@ impl BoxTreeGPUDataHandler {
             NodeContent::Nothing => {
                 panic!("HOW DO I ERASE NOTHING. AMERICA EXPLAIN")
             }
-            NodeContent::Internal(_occupied_bits) => {
+            NodeContent::Internal => {
                 debug_assert!(
                         self.upload_targets.node_key_vs_meta_index
                             .contains_right(&child_descriptor),
@@ -397,7 +397,7 @@ impl BoxTreeGPUDataHandler {
         let parent_first_child_index = node_index * BOX_NODE_CHILDREN_COUNT;
         match tree.nodes.get(node_key) {
             NodeContent::Nothing => {}
-            NodeContent::Internal(_) => {
+            NodeContent::Internal => {
                 for sectant in 0..BOX_NODE_CHILDREN_COUNT {
                     let child_key = tree.node_children[node_key].child(sectant as u8);
                     if child_key != empty_marker::<u32>() as usize {
@@ -651,7 +651,7 @@ impl BoxTreeGPUDataHandler {
                         node_key as usize,
                         child_sectant as usize,
                     ),
-                    NodeContent::Nothing | NodeContent::Internal(_) => {
+                    NodeContent::Nothing | NodeContent::Internal => {
                         unreachable!("Shouldn't add brick from Internal or empty node!")
                     }
                 }

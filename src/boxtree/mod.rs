@@ -18,7 +18,9 @@ pub use types::{
 };
 
 use crate::{
-    boxtree::types::{BrickData, NodeChildren, NodeContent, OctreeError, PaletteIndexValues},
+    boxtree::types::{
+        BrickData, NodeChildren, NodeContent, NodeData, OctreeError, PaletteIndexValues,
+    },
     object_pool::{empty_marker, ObjectPool},
     spatial::{
         math::{flat_projection, matrix_index_for},
@@ -219,15 +221,13 @@ impl<
         }
         let node_count_estimation = (size / brick_dimension).pow(3);
         let mut nodes = ObjectPool::with_capacity(node_count_estimation.min(1024) as usize);
-        let root_node_key = nodes.push(NodeContent::Nothing); // The first element is the root Node
+        let root_node_key = nodes.push(NodeData::empty_node()); // The first element is the root Node
         assert!(root_node_key == 0);
         Ok(Self {
             auto_simplify: true,
             boxtree_size: size,
             brick_dim: brick_dimension,
             nodes,
-            node_children: vec![NodeChildren::default()],
-            node_mips: vec![BrickData::Empty],
             voxel_color_palette: vec![],
             voxel_data_palette: vec![],
             map_to_color_index_in_palette: HashMap::new(),
@@ -279,7 +279,7 @@ impl<
             return empty_marker();
         };
 
-        match self.nodes.get(current_node_key) {
+        match &self.nodes.get(current_node_key).content {
             NodeContent::Nothing => empty_marker(),
             NodeContent::Leaf(bricks) => {
                 // In case brick_dimension == boxtree size, the root node can not be a leaf...
@@ -327,7 +327,7 @@ impl<
                 }
                 BrickData::Solid(voxel) => *voxel,
             },
-            NodeContent::Internal(_occupied_bits) => {
+            NodeContent::Internal => {
                 // Deepest child at given position is empty
                 empty_marker()
             }

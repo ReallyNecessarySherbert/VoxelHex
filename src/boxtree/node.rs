@@ -1,84 +1,12 @@
 use crate::boxtree::{
     empty_marker,
     types::{
-        Albedo, BrickData, NodeChildren, NodeConnection, NodeContent, PaletteIndexValues, VoxelData,
+        Albedo, BrickData, NodeChildren, NodeContent, NodeData, PaletteIndexValues, VoxelData,
     },
     BoxTreeEntry, V3c, BOX_NODE_CHILDREN_COUNT,
 };
 use crate::spatial::math::{flat_projection, set_occupied_bitmap_value};
-use std::{
-    fmt::{Debug, Error, Formatter},
-    matches,
-};
-
-//####################################################################################
-//  ██████   █████    ███████    ██████████   ██████████
-// ░░██████ ░░███   ███░░░░░███ ░░███░░░░███ ░░███░░░░░█
-//  ░███░███ ░███  ███     ░░███ ░███   ░░███ ░███  █ ░
-//  ░███░░███░███ ░███      ░███ ░███    ░███ ░██████
-//  ░███ ░░██████ ░███      ░███ ░███    ░███ ░███░░█
-//  ░███  ░░█████ ░░███     ███  ░███    ███  ░███ ░   █
-//  █████  ░░█████ ░░░███████░   ██████████   ██████████
-// ░░░░░    ░░░░░    ░░░░░░░    ░░░░░░░░░░   ░░░░░░░░░░
-//    █████████  █████   █████ █████ █████       ██████████   ███████████   ██████████ ██████   █████
-//   ███░░░░░███░░███   ░░███ ░░███ ░░███       ░░███░░░░███ ░░███░░░░░███ ░░███░░░░░█░░██████ ░░███
-//  ███     ░░░  ░███    ░███  ░███  ░███        ░███   ░░███ ░███    ░███  ░███  █ ░  ░███░███ ░███
-// ░███          ░███████████  ░███  ░███        ░███    ░███ ░██████████   ░██████    ░███░░███░███
-// ░███          ░███░░░░░███  ░███  ░███        ░███    ░███ ░███░░░░░███  ░███░░█    ░███ ░░██████
-// ░░███     ███ ░███    ░███  ░███  ░███      █ ░███    ███  ░███    ░███  ░███ ░   █ ░███  ░░█████
-//  ░░█████████  █████   █████ █████ ███████████ ██████████   █████   █████ ██████████ █████  ░░█████
-//   ░░░░░░░░░  ░░░░░   ░░░░░ ░░░░░ ░░░░░░░░░░░ ░░░░░░░░░░   ░░░░░   ░░░░░ ░░░░░░░░░░ ░░░░░    ░░░░░
-//####################################################################################
-impl<T: Default + Debug> Debug for NodeChildren<T> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
-        match &self {
-            NodeChildren::NoChildren => write!(f, "NodeChildren::NoChildren"),
-            NodeChildren::Children(array) => {
-                write!(f, "NodeChildren::Children({:?})", array)
-            }
-            NodeChildren::OccupancyBitmap(mask) => {
-                write!(f, "NodeChildren::OccupancyBitmap({:#10X})", mask)
-            }
-        }
-    }
-}
-impl NodeConnection {
-    pub(crate) fn child(&self, sectant: u8) -> usize {
-        match &self {
-            NodeChildren::Children(c) => c[sectant as usize] as usize,
-            _ => empty_marker(),
-        }
-    }
-
-    pub(crate) fn child_mut(&mut self, index: usize) -> Option<&mut u32> {
-        if let NodeChildren::NoChildren = self {
-            *self = NodeChildren::Children([empty_marker(); BOX_NODE_CHILDREN_COUNT]);
-        }
-        match self {
-            NodeChildren::Children(c) => Some(&mut c[index]),
-            _ => panic!("Attempted to modify NodeChild[{:?}] of {:?}", index, self),
-        }
-    }
-
-    /// Provides a slice for iteration, if there are children to iterate on
-    pub(crate) fn iter(&self) -> Option<std::slice::Iter<u32>> {
-        match &self {
-            NodeChildren::Children(c) => Some(c.iter()),
-            _ => None,
-        }
-    }
-
-    /// Erases content, if any
-    pub(crate) fn clear(&mut self, child_index: usize) {
-        debug_assert!(child_index < 8);
-        if let NodeChildren::Children(c) = self {
-            c[child_index] = empty_marker();
-            if 8 == c.iter().filter(|e| **e == empty_marker::<u32>()).count() {
-                *self = NodeChildren::NoChildren;
-            }
-        }
-    }
-}
+use std::{matches, u64};
 
 //####################################################################################
 //  ███████████  ███████████   █████   █████████  █████   ████
@@ -220,15 +148,91 @@ impl BrickData<PaletteIndexValues> {
 //  ░███  ░░█████ ░░███     ███  ░███    ███  ░███ ░   █
 //  █████  ░░█████ ░░░███████░   ██████████   ██████████
 // ░░░░░    ░░░░░    ░░░░░░░    ░░░░░░░░░░   ░░░░░░░░░░
-//    █████████     ███████    ██████   █████ ███████████ ██████████ ██████   █████ ███████████
-//   ███░░░░░███  ███░░░░░███ ░░██████ ░░███ ░█░░░███░░░█░░███░░░░░█░░██████ ░░███ ░█░░░███░░░█
-//  ███     ░░░  ███     ░░███ ░███░███ ░███ ░   ░███  ░  ░███  █ ░  ░███░███ ░███ ░   ░███  ░
-// ░███         ░███      ░███ ░███░░███░███     ░███     ░██████    ░███░░███░███     ░███
-// ░███         ░███      ░███ ░███ ░░██████     ░███     ░███░░█    ░███ ░░██████     ░███
-// ░░███     ███░░███     ███  ░███  ░░█████     ░███     ░███ ░   █ ░███  ░░█████     ░███
-//  ░░█████████  ░░░███████░   █████  ░░█████    █████    ██████████ █████  ░░█████    █████
-//   ░░░░░░░░░     ░░░░░░░    ░░░░░    ░░░░░    ░░░░░    ░░░░░░░░░░ ░░░░░    ░░░░░    ░░░░░
+//  ██████████     █████████   ███████████   █████████
+// ░░███░░░░███   ███░░░░░███ ░█░░░███░░░█  ███░░░░░███
+//  ░███   ░░███ ░███    ░███ ░   ░███  ░  ░███    ░███
+//  ░███    ░███ ░███████████     ░███     ░███████████
+//  ░███    ░███ ░███░░░░░███     ░███     ░███░░░░░███
+//  ░███    ███  ░███    ░███     ░███     ░███    ░███
+//  ██████████   █████   █████    █████    █████   █████
+// ░░░░░░░░░░   ░░░░░   ░░░░░    ░░░░░    ░░░░░   ░░░░░
 //####################################################################################
+impl NodeData {
+    /// Creates an empty node
+    pub(crate) fn empty_node() -> Self {
+        NodeData {
+            content: NodeContent::Nothing,
+            children: NodeChildren::NoChildren,
+            mip: BrickData::Empty,
+            occupied_bits: 0,
+        }
+    }
+
+    /// Creates a node where all contained voxels are te same
+    pub(crate) fn uniform_solid_node(voxel: PaletteIndexValues) -> Self {
+        NodeData {
+            content: NodeContent::UniformLeaf(BrickData::Solid(voxel)),
+            children: NodeChildren::NoChildren,
+            mip: BrickData::Solid(voxel),
+            occupied_bits: u64::MAX,
+        }
+    }
+
+    /// Creates a node where all contained voxels are te same
+    pub(crate) fn uniform_parted_node(brick: BrickData<u32>, occupied_bits: u64) -> Self {
+        NodeData {
+            content: NodeContent::UniformLeaf(brick),
+            children: NodeChildren::NoChildren,
+            mip: BrickData::Empty,
+            occupied_bits,
+        }
+    }
+
+    /// Queries the child pointer at the given sectant
+    pub(crate) fn child(&self, sectant: u8) -> usize {
+        match &self.children {
+            NodeChildren::Children(c) => c[sectant as usize] as usize,
+            _ => empty_marker(),
+        }
+    }
+
+    /// Mutable accessor for the child pointer under the given index
+    pub(crate) fn child_mut(&mut self, index: usize) -> Option<&mut u32> {
+        if let NodeChildren::NoChildren = self.children {
+            self.children = NodeChildren::Children([empty_marker(); BOX_NODE_CHILDREN_COUNT]);
+        }
+        match self.children {
+            NodeChildren::Children(ref mut c) => Some(&mut c[index]),
+            _ => panic!("Attempted to modify NodeChild[{:?}] of {:?}", index, self),
+        }
+    }
+
+    /// Provides a slice of child pointers, if there are children to iterate on
+    pub(crate) fn children_iter(&self) -> Option<std::slice::Iter<u32>> {
+        match &self.children {
+            NodeChildren::Children(c) => Some(c.iter()),
+            _ => None,
+        }
+    }
+
+    /// Erases child pointers, if any
+    pub(crate) fn clear_child(&mut self, child_index: usize) {
+        debug_assert!(child_index < BOX_NODE_CHILDREN_COUNT);
+        if let NodeChildren::Children(ref mut c) = self.children {
+            c[child_index] = empty_marker();
+            if 8 == c.iter().filter(|e| **e == empty_marker::<u32>()).count() {
+                self.children = NodeChildren::NoChildren;
+            }
+        }
+
+        //TODO: erase this assertion as this is just to make sure the value is actually applied
+        debug_assert!(if let NodeChildren::Children(ref mut c) = self.children {
+            c[child_index] == empty_marker::<u32>()
+        } else {
+            true
+        });
+    }
+}
 
 impl NodeContent<PaletteIndexValues> {
     pub(crate) fn pix_visual(color_index: u16) -> PaletteIndexValues {
@@ -389,7 +393,7 @@ impl NodeContent<PaletteIndexValues> {
                 }
                 true
             }
-            NodeContent::Internal(_) => false,
+            NodeContent::Internal => false,
             NodeContent::Nothing => true,
         }
     }
@@ -427,14 +431,14 @@ impl NodeContent<PaletteIndexValues> {
                 }
                 true
             }
-            NodeContent::Internal(_) | NodeContent::Nothing => false,
+            NodeContent::Internal | NodeContent::Nothing => false,
         }
     }
 
     pub(crate) fn compare(&self, other: &NodeContent<PaletteIndexValues>) -> bool {
         match self {
             NodeContent::Nothing => matches!(other, NodeContent::Nothing),
-            NodeContent::Internal(_) => false, // Internal nodes comparison doesn't make sense
+            NodeContent::Internal => false, // Internal nodes comparison doesn't make sense
             NodeContent::UniformLeaf(brick) => {
                 if let NodeContent::UniformLeaf(obrick) = other {
                     brick == obrick

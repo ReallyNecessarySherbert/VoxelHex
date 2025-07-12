@@ -153,7 +153,7 @@ impl<
                 return node_stack;
             }
 
-            match self.nodes.get(*current_node_key) {
+            match self.nodes.get(*current_node_key).content {
                 NodeContent::Nothing => {
                     unreachable!("Access stack for node landed on empty parent node")
                 }
@@ -163,10 +163,10 @@ impl<
                 NodeContent::UniformLeaf(_) => {
                     unreachable!("Access stack for node landed on uniform leaf parent node")
                 }
-                NodeContent::Internal(_occupied_bits) => {
+                NodeContent::Internal => {
                     // Hash the position to the target child
                     let child_at_position =
-                        self.node_children[*current_node_key].child(*current_sectant);
+                        self.nodes.get(*current_node_key).child(*current_sectant);
 
                     // There is a valid child at the given position inside the node, recurse into it
                     if self.nodes.key_is_valid(child_at_position) {
@@ -248,14 +248,17 @@ impl<
         // traverse down the mirror stack to the desired node level
         let mut node_key = node_stack.last().unwrap().0;
         for target_sectant in mirror_stack.iter() {
-            let child_at_position = self.node_children[node_key].child(*target_sectant);
+            let child_at_position = self.nodes.get(node_key).child(*target_sectant);
             if self.nodes.key_is_valid(child_at_position) {
                 node_key = child_at_position;
                 next_sectant = *target_sectant;
-            } else if matches!(self.nodes.get(node_key), NodeContent::Leaf(_)) {
+            } else if matches!(self.nodes.get(node_key).content, NodeContent::Leaf(_)) {
                 // leaf nodes don't have valid node children, but sectant can still have valid siblings
                 return Some((node_key, *target_sectant));
-            } else if matches!(self.nodes.get(node_key), NodeContent::UniformLeaf(_)) {
+            } else if matches!(
+                self.nodes.get(node_key).content,
+                NodeContent::UniformLeaf(_)
+            ) {
                 // leaf nodes above the hierarchy next to original node count as siblings
                 // even if the opposite is not true
                 return Some((node_key, BOX_NODE_CHILDREN_COUNT as u8));
@@ -281,29 +284,33 @@ impl<
         );
 
         loop {
-            match self.nodes.get(current_node_key) {
+            match self.nodes.get(current_node_key).content {
                 NodeContent::Nothing | NodeContent::Leaf(_) | NodeContent::UniformLeaf(_) => {
                     return Some(current_node_key);
                 }
-                NodeContent::Internal(occupied_bits) => {
+                NodeContent::Internal => {
                     // Hash the position to the target child
                     let child_sectant_at_position = node_bounds.sectant_for(position);
-                    let child_at_position =
-                        self.node_children[current_node_key].child(child_sectant_at_position);
+                    let child_at_position = self
+                        .nodes
+                        .get(current_node_key)
+                        .child(child_sectant_at_position);
 
                     // There is a valid child at the given position inside the node, recurse into it
                     if self.nodes.key_is_valid(child_at_position) {
                         debug_assert_ne!(
                             0,
-                            occupied_bits & (0x01 << child_sectant_at_position),
-                            "Node[{:?}] under {:?} \n has a child(node[{:?}]) in sectant[{:?}](global position: {:?}), which is incompatible with the occupancy bitmap: {:#10X}; \n child node: {:?}; child node children: {:?};",
+                            self
+                        .nodes
+                        .get(current_node_key).occupied_bits & (0x01 << child_sectant_at_position),
+                            "Node[{:?}] under {:?} \n has a child in sectant[{:?}](global position: {:?}), which is incompatible with the occupancy bitmap: {:#10X}; \n child node: {:?}; child node children: {:?};",
                             current_node_key,
                             node_bounds,
-                            self.node_children[current_node_key].child(child_sectant_at_position),
                             child_sectant_at_position,
-                            position, occupied_bits,
-                            self.nodes.get(self.node_children[current_node_key].child(child_sectant_at_position)),
-                            self.node_children[self.node_children[current_node_key].child(child_sectant_at_position)]
+                            position,
+                            self.nodes.get(current_node_key).occupied_bits,
+                            self.nodes.get(child_at_position),
+                            child_at_position,
                         );
                         current_node_key = child_at_position;
                         *node_bounds =
