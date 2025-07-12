@@ -1,10 +1,6 @@
 use std::ops::{Add, AddAssign, Div, Mul, Rem, Sub, SubAssign};
 
 #[derive(Default, Clone, Copy, Debug, Eq, PartialEq, PartialOrd)]
-#[cfg_attr(
-    feature = "serialization",
-    derive(serde::Serialize, serde::Deserialize)
-)]
 #[repr(C)]
 pub struct V3c<T> {
     pub x: T,

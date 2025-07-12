@@ -3,18 +3,17 @@ pub use crate::raytracing::bevy::types::{
     VhxViewSet, Viewport,
 };
 use crate::{
-    boxtree::{V3c, V3cf32, VoxelData, BOX_NODE_CHILDREN_COUNT},
+    boxtree::{BOX_NODE_CHILDREN_COUNT, VoxelData, V3c, V3cf32},
     object_pool::empty_marker,
     raytracing::{
+        BoxTreeRenderData,
         bevy::{
             data::boxtree_properties,
             types::{UploadQueueStatus, UploadQueueTargets},
         },
-        BoxTreeRenderData,
     },
     spatial::Cube,
 };
-use bendy::{decoding::FromBencode, encoding::ToBencode};
 use bevy::{
     prelude::{Assets, Handle, Image, Res, ResMut, Vec4},
     render::{
@@ -27,37 +26,10 @@ use bevy::{
 use bimap::BiHashMap;
 use std::{
     collections::{HashMap, HashSet},
-    hash::Hash,
     sync::{Arc, RwLock},
 };
 
-impl<
-        #[cfg(all(feature = "bytecode", feature = "serialization"))] T: FromBencode
-            + ToBencode
-            + Serialize
-            + DeserializeOwned
-            + Default
-            + Eq
-            + Clone
-            + Hash
-            + VoxelData
-            + Send
-            + Sync
-            + 'static,
-        #[cfg(all(feature = "bytecode", not(feature = "serialization")))] T: FromBencode + ToBencode + Default + Eq + Clone + Hash + VoxelData + Send + Sync + 'static,
-        #[cfg(all(not(feature = "bytecode"), feature = "serialization"))] T: Serialize
-            + DeserializeOwned
-            + Default
-            + Eq
-            + Clone
-            + Hash
-            + VoxelData
-            + Send
-            + Sync
-            + 'static,
-        #[cfg(all(not(feature = "bytecode"), not(feature = "serialization")))] T: Default + Eq + Clone + Hash + VoxelData + Send + Sync + 'static,
-    > BoxTreeGPUHost<T>
-{
+impl<T: VoxelData> BoxTreeGPUHost<T> {
     /// Creates GPU compatible data renderable on the GPU from an BoxTree
     pub fn create_new_view(
         &mut self,

@@ -1,39 +1,22 @@
 use crate::spatial::lut::SECTANT_OFFSET_LUT;
 use crate::{
     boxtree::{
+        Albedo, BOX_NODE_DIMENSION, BoxTree, OOB_SECTANT, VoxelData,
         iterate::MIPResamplingFunction,
         types::{
             BoxTreeEntry, BrickData, MIPMapStrategy, MIPResamplingMethods, NodeChildren,
             NodeContent, PaletteIndexValues, StrategyUpdater,
         },
-        Albedo, BoxTree, VoxelData, BOX_NODE_DIMENSION, OOB_SECTANT,
     },
     object_pool::empty_marker,
     spatial::{
-        math::{flat_projection, matrix_index_for, offset_sectant, vector::V3c},
         Cube,
+        math::{flat_projection, matrix_index_for, offset_sectant, vector::V3c},
     },
 };
-use std::{collections::HashMap, hash::Hash};
+use std::collections::HashMap;
 
-#[cfg(feature = "bytecode")]
-use bendy::{decoding::FromBencode, encoding::ToBencode};
-
-impl<
-        #[cfg(all(feature = "bytecode", feature = "serialization"))] T: FromBencode
-            + ToBencode
-            + Serialize
-            + DeserializeOwned
-            + Default
-            + Eq
-            + Clone
-            + Hash
-            + VoxelData,
-        #[cfg(all(feature = "bytecode", not(feature = "serialization")))] T: FromBencode + ToBencode + Default + Eq + Clone + Hash + VoxelData,
-        #[cfg(all(not(feature = "bytecode"), feature = "serialization"))] T: Serialize + DeserializeOwned + Default + Eq + Clone + Hash + VoxelData,
-        #[cfg(all(not(feature = "bytecode"), not(feature = "serialization")))] T: Default + Eq + Clone + Hash + VoxelData,
-    > BoxTree<T>
-{
+impl<T: VoxelData> BoxTree<T> {
     //####################################################################################
     //  ██████   ██████ █████ ███████████
     // ░░██████ ██████ ░░███ ░░███░░░░░███
@@ -474,21 +457,7 @@ impl MIPMapStrategy {
     }
 }
 
-impl<
-        #[cfg(all(feature = "bytecode", feature = "serialization"))] T: FromBencode
-            + ToBencode
-            + Serialize
-            + DeserializeOwned
-            + Default
-            + Eq
-            + Clone
-            + Hash
-            + VoxelData,
-        #[cfg(all(feature = "bytecode", not(feature = "serialization")))] T: FromBencode + ToBencode + Default + Eq + Clone + Hash + VoxelData,
-        #[cfg(all(not(feature = "bytecode"), feature = "serialization"))] T: Serialize + DeserializeOwned + Default + Eq + Clone + Hash + VoxelData,
-        #[cfg(all(not(feature = "bytecode"), not(feature = "serialization")))] T: Default + Eq + Clone + Hash + VoxelData,
-    > StrategyUpdater<'_, T>
-{
+impl<T: VoxelData> StrategyUpdater<'_, T> {
     /// Resets the strategy for MIP maps during resample operations
     pub fn reset(self) -> Self {
         self.0.mip_map_strategy = MIPMapStrategy::default();
@@ -605,7 +574,9 @@ impl<
                                 NodeChildren::OccupancyBitmap(_) | NodeChildren::Children(_)
                             ),
                             "Expected node[{}] child[{}] to have children or occupancy instead of: {:?}",
-                            current_node_key, target_sectant, tree.node_children[target_child_key]
+                            current_node_key,
+                            target_sectant,
+                            tree.node_children[target_child_key]
                         );
                         node_stack.push((
                             target_child_key,

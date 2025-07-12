@@ -1,5 +1,5 @@
 use crate::{
-    boxtree::{types::PaletteIndexValues, BoxTree, V3c, V3cf32, VoxelData},
+    boxtree::{BoxTree, V3c, V3cf32, VoxelData, types::PaletteIndexValues},
     spatial::Cube,
 };
 use bevy::{

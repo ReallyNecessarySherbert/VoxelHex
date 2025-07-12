@@ -9,8 +9,7 @@ fn icon() -> UiLayout {
 pub(crate) fn fov_to_x(fov: u32, size_x: f32, boundaries: [u32; 2]) -> f32 {
     debug_assert!(
         boundaries[0] <= boundaries[1],
-        "Expected valid fov boundaries instead of {:?}",
-        boundaries
+        "Expected valid fov boundaries instead of {boundaries:?}"
     );
     (size_x * fov as f32) / (boundaries[1] - boundaries[0]) as f32
 }

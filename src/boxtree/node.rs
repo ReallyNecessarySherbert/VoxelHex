@@ -1,9 +1,8 @@
 use crate::boxtree::{
-    empty_marker,
+    BOX_NODE_CHILDREN_COUNT, BoxTreeEntry, V3c, empty_marker,
     types::{
         Albedo, BrickData, NodeChildren, NodeConnection, NodeContent, PaletteIndexValues, VoxelData,
     },
-    BoxTreeEntry, V3c, BOX_NODE_CHILDREN_COUNT,
 };
 use crate::spatial::math::{flat_projection, set_occupied_bitmap_value};
 use std::{
@@ -61,7 +60,7 @@ impl NodeConnection {
     }
 
     /// Provides a slice for iteration, if there are children to iterate on
-    pub(crate) fn iter(&self) -> Option<std::slice::Iter<u32>> {
+    pub(crate) fn iter(&self) -> Option<std::slice::Iter<'_, u32>> {
         match &self {
             NodeChildren::Children(c) => Some(c.iter()),
             _ => None,

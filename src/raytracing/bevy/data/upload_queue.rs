@@ -2,7 +2,7 @@ use crate::{
     boxtree::{
         iterate::execute_for_relevant_sectants,
         types::{BrickData, NodeContent},
-        BoxTree, V3c, V3cf32, VoxelData, BOX_NODE_CHILDREN_COUNT, BOX_NODE_DIMENSION,
+        BoxTree, VoxelData, V3c, V3cf32, BOX_NODE_CHILDREN_COUNT, BOX_NODE_DIMENSION,
     },
     object_pool::empty_marker,
     raytracing::bevy::{
@@ -14,12 +14,10 @@ use crate::{
     },
     spatial::Cube,
 };
-use bendy::{decoding::FromBencode, encoding::ToBencode};
 use bevy::{
     ecs::system::{Res, ResMut},
     render::render_resource::encase::UniformBuffer,
 };
-use std::hash::Hash;
 
 impl UploadQueueTargets {
     pub(crate) fn reset(&mut self) {
@@ -32,23 +30,7 @@ impl UploadQueueTargets {
 }
 
 /// Recreates the list of nodes and bricks to upload based on the current position and view distance
-pub(crate) fn rebuild<
-    #[cfg(all(feature = "bytecode", feature = "serialization"))] T: FromBencode
-        + ToBencode
-        + Serializ
-        + DeserializeOwned
-        + Default
-        + Eq
-        + Clone
-        + Hash
-        + VoxelData
-        + Send
-        + Sync
-        + 'static,
-    #[cfg(all(feature = "bytecode", not(feature = "serialization")))] T: FromBencode + ToBencode + Default + Eq + Clone + Hash + VoxelData + Send + Sync + 'static,
-    #[cfg(all(not(feature = "bytecode"), feature = "serialization"))] T: Serialize + DeserializeOwned + Default + Eq + Clone + Hash + VoxelData + Send + Sync + 'static,
-    #[cfg(all(not(feature = "bytecode"), not(feature = "serialization")))] T: Default + Eq + Clone + Hash + VoxelData + Send + Sync + 'static,
->(
+pub(crate) fn rebuild<T: VoxelData>(
     tree: &BoxTree<T>,
     viewport_center_: &V3cf32,
     view_distance: f32,
@@ -149,23 +131,7 @@ pub(crate) fn rebuild<
     );
 }
 
-fn add_children_to_upload_queue<
-    #[cfg(all(feature = "bytecode", feature = "serialization"))] T: FromBencode
-        + ToBencode
-        + Serializ
-        + DeserializeOwned
-        + Default
-        + Eq
-        + Clone
-        + Hash
-        + VoxelData
-        + Send
-        + Sync
-        + 'static,
-    #[cfg(all(feature = "bytecode", not(feature = "serialization")))] T: FromBencode + ToBencode + Default + Eq + Clone + Hash + VoxelData + Send + Sync + 'static,
-    #[cfg(all(not(feature = "bytecode"), feature = "serialization"))] T: Serialize + DeserializeOwned + Default + Eq + Clone + Hash + VoxelData + Send + Sync + 'static,
-    #[cfg(all(not(feature = "bytecode"), not(feature = "serialization")))] T: Default + Eq + Clone + Hash + VoxelData + Send + Sync + 'static,
->(
+fn add_children_to_upload_queue<T: VoxelData>(
     (node_key, node_bounds, node_mip_level): (usize, Cube, u32),
     tree: &BoxTree<T>,
     viewport_center: &V3c<f32>,
@@ -305,23 +271,7 @@ fn add_children_to_upload_queue<
     }
 }
 
-pub(crate) fn handle_changes<
-    #[cfg(all(feature = "bytecode", feature = "serialization"))] T: FromBencode
-        + ToBencode
-        + Serialize
-        + DeserializeOwned
-        + Default
-        + Eq
-        + Clone
-        + Hash
-        + VoxelData
-        + Send
-        + Sync
-        + 'static,
-    #[cfg(all(feature = "bytecode", not(feature = "serialization")))] T: FromBencode + ToBencode + Default + Eq + Clone + Hash + VoxelData + Send + Sync + 'static,
-    #[cfg(all(not(feature = "bytecode"), feature = "serialization"))] T: Serialize + DeserializeOwned + Default + Eq + Clone + Hash + VoxelData + Send + Sync + 'static,
-    #[cfg(all(not(feature = "bytecode"), not(feature = "serialization")))] T: Default + Eq + Clone + Hash + VoxelData + Send + Sync + 'static,
->(
+pub(crate) fn handle_changes<T: VoxelData>(
     tree_gpu_host: Option<Res<BoxTreeGPUHost<T>>>,
     mut vhx_pipeline: Option<ResMut<VhxRenderPipeline>>,
     mut viewset: Option<ResMut<VhxViewSet>>,

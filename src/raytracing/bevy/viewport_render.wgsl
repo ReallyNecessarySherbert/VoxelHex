@@ -1,3 +1,4 @@
+==== BASE ====
 // The time since startup data is in the globals binding which is part of the mesh_view_bindings import
 #import bevy_pbr::{
     mesh_view_bindings::globals,
@@ -16,7 +17,6 @@ struct Cube {
 
 const OOB_SECTANT = 64u;
 const BOX_NODE_DIMENSION = 4u;
-const BOX_NODE_DIMENSION_SQUARED = 16u;
 const BOX_NODE_CHILDREN_COUNT = 64u;
 const FLOAT_ERROR_TOLERANCE = 0.00001;
 const COLOR_FOR_NODE_REQUEST_SENT = vec3f(0.5,0.3,0.0);
@@ -36,20 +36,7 @@ fn hash_region(offset: vec3f, size: f32) -> u32 {
     return (
         index.x
         + (index.y * BOX_NODE_DIMENSION)
-        + (index.z * BOX_NODE_DIMENSION_SQUARED)
-    );
-}
-
-// Unique to this implementation, not adapted from rust code
-// used to be crate::spatial::math::sectant_offset, but was replaced by LUT
-fn sectant_offset(sectant_index: u32) -> vec3f {
-    return (
-        vec3f(
-            f32(sectant_index % BOX_NODE_DIMENSION),
-            f32((sectant_index % BOX_NODE_DIMENSION_SQUARED) / BOX_NODE_DIMENSION),
-            f32(sectant_index / BOX_NODE_DIMENSION_SQUARED)
-        )
-        / f32(BOX_NODE_DIMENSION)
+        + (index.z * BOX_NODE_DIMENSION * BOX_NODE_DIMENSION)
     );
 }
 
@@ -300,7 +287,12 @@ fn traverse_brick(
             return BrickHit(false, vec3u(1, 1, 1), 0);
         }
         */// --- DEBUG ---
-        if any(current_index < vec3i(0)) || any(current_index >= vec3i(dimension))
+        if current_index.x < 0
+            || current_index.x >= dimension
+            || current_index.y < 0
+            || current_index.y >= dimension
+            || current_index.z < 0
+            || current_index.z >= dimension
         {
             return BrickHit(false, vec3u(), 0);
         }
@@ -483,7 +475,9 @@ fn traverse_node_for_ocbits(
     var steps_taken = 0u;
     var result = 0.;
     loop {
-        if steps_taken > 10 || any(current_index < vec3i(0)) || any(current_index >= vec3i(4))
+        if steps_taken > 10 || current_index.x < 0 || current_index.x >= 4
+            || current_index.y < 0 || current_index.y >= 4
+            || current_index.z < 0 || current_index.z >= 4
         {
             break;
         }
@@ -519,6 +513,47 @@ fn traverse_node_for_ocbits(
     return result;
 }
 
+fn calculate_next_sectant(current_sectant: u32, step: vec3i) -> u32 {
+    const DIM: u32 = 4u; // FIXME: hardcoded
+    const DIM_SQ: u32 = 16u; // DIM * DIM
+    const CHILDREN_COUNT: u32 = 64u; // DIM * DIM * DIM
+
+    // if we're already out of bounds, stay out of bounds
+    if (current_sectant >= CHILDREN_COUNT) {
+        return OOB_SECTANT;
+    }
+
+    // deconstruct the 1D index into 3D integer coordinates
+    let ix = i32(current_sectant % DIM);
+    let iy = i32((current_sectant % DIM_SQ) / DIM);
+    let iz = i32(current_sectant / DIM_SQ);
+    let current_coords = vec3i(ix, iy, iz);
+
+    // apply the step
+    let next_coords = current_coords + step;
+
+    // ccheck for OOB
+    if (any(next_coords < vec3i(0)) || any(next_coords >= vec3i(i32(DIM)))) {
+        return OOB_SECTANT;
+    }
+
+    // reconstruct the 1D index from the new 3D coordinates
+    let next_coords_u = vec3u(next_coords);
+    return next_coords_u.x + (next_coords_u.y * DIM) + (next_coords_u.z * DIM_SQ);
+}
+
+fn get_sectant_offset(sectant_index: u32) -> vec3f {
+    const DIM: u32 = 4u; // FIXME: hardcoded
+    const DIM_F: f32 = 4.0;
+    const DIM_SQ: u32 = 16u;
+
+    let ix = f32(sectant_index % DIM);
+    let iy = f32((sectant_index % DIM_SQ) / DIM);
+    let iz = f32(sectant_index / DIM_SQ);
+
+    return vec3f(ix, iy, iz) / DIM_F;
+}
+
 fn get_by_ray(ray: ptr<function, Line>, start_distance: f32) -> OctreeRayIntersection {
     var ray_scale_factors = get_dda_scale_factors(ray); // Should be const, but then it can't be passed as ptr
     var tmp_vec = vec3f(1.) + normalize((*ray).direction); // using local variable as temporary storage
@@ -540,14 +575,13 @@ fn get_by_ray(ray: ptr<function, Line>, start_distance: f32) -> OctreeRayInterse
     var node_stack: array<u32, NODE_STACK_SIZE>;
     var node_stack_meta: u32 = 0;
     var ray_current_point = (*ray).origin + (*ray).direction * start_distance;
-    var current_bounds = Cube(vec3f(0.), f32(boxtree_meta_data.boxtree_size));
+    var current_bounds = Cube(vec3(0.), f32(boxtree_meta_data.boxtree_size));
     var target_bounds = current_bounds;
     var current_node_key = BOXTREE_ROOT_NODE_KEY;
     var target_sectant = OOB_SECTANT;
-    var target_sectant_center = vec3f(0.);
 
     let root_intersect = cube_intersect_ray(current_bounds, ray);
-    if(root_intersect.hit) {
+    if(root_intersect.hit){
         if( 0. == start_distance && root_intersect.impact_hit == true ) {
             ray_current_point += (*ray).direction * root_intersect.impact_distance;
         }
@@ -578,7 +612,6 @@ fn get_by_ray(ray: ptr<function, Line>, start_distance: f32) -> OctreeRayInterse
             sectant_offset(target_sectant) * current_bounds.size
             + vec3f(target_bounds.size / 2.)
         );
-
         node_stack_push(&node_stack, &node_stack_meta, BOXTREE_ROOT_NODE_KEY);
         /*// +++ DEBUG +++
         var safety = 0;
@@ -761,7 +794,7 @@ fn get_by_ray(ray: ptr<function, Line>, start_distance: f32) -> OctreeRayInterse
                 // PUSH
                 current_node_key = target_child_descriptor;
                 current_bounds = target_bounds;
-                target_sectant = hash_region( // new target sectant
+                target_sectant = hash_region( // child_target_sectant
                     (ray_current_point - target_bounds.min_position),
                     target_bounds.size
                 );
@@ -770,7 +803,6 @@ fn get_by_ray(ray: ptr<function, Line>, start_distance: f32) -> OctreeRayInterse
                     current_bounds.min_position
                     + (sectant_offset(target_sectant) * current_bounds.size)
                 );
-                target_sectant_center = target_bounds.min_position + vec3f(target_bounds.size / 2.);
                 node_stack_push(&node_stack, &node_stack_meta, target_child_descriptor);
             } else {
                 // ADVANCE
@@ -837,8 +869,12 @@ fn get_by_ray(ray: ptr<function, Line>, start_distance: f32) -> OctreeRayInterse
             OOB_SECTANT,
             hash_region(ray_current_point, f32(boxtree_meta_data.boxtree_size)),
             dot(ray_current_point - (*ray).origin, ray_current_point - (*ray).origin) < max_distance
-            && all(ray_current_point < vec3f(boxtree_meta_data.boxtree_size))
-            && all(ray_current_point > vec3f(0.))
+            && ray_current_point.x < f32(boxtree_meta_data.boxtree_size)
+            && ray_current_point.y < f32(boxtree_meta_data.boxtree_size)
+            && ray_current_point.z < f32(boxtree_meta_data.boxtree_size)
+            && ray_current_point.x > 0.
+            && ray_current_point.y > 0.
+            && ray_current_point.z > 0.
         );
     } // while (ray inside root bounds)
     return OctreeRayIntersection(false, vec4f(0., 0., 0., 1.), ray_current_point, vec3f(0., 0., 1.));
@@ -1061,3 +1097,4 @@ const RAY_TO_NODE_OCCUPANCY_BITMASK_LUT: array<array<u32, 16>, 64> = array<array
     array<u32, 16>(2004318071,2004318071,3435973836,3435973836,0,2004287488,0,3435921408,1879076864,1879076864,3221274624,3221274624,0,1879048192,0,3221225472,),
     array<u32, 16>(4294967295,4294967295,2290649224,2290649224,0,4294901760,0,2290614272,4026593280,4026593280,2147516416,2147516416,0,4026531840,0,2147483648,),
 );
+==== BASE ====

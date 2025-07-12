@@ -2,32 +2,17 @@ mod cache;
 pub(crate) mod upload_queue;
 
 use crate::{
-    boxtree::{BoxTree, V3c, VoxelData, BOX_NODE_CHILDREN_COUNT},
+    boxtree::{BOX_NODE_CHILDREN_COUNT, BoxTree, VoxelData, V3c},
     object_pool::empty_marker,
     raytracing::bevy::types::BoxTreeGPUView,
 };
 use bevy::render::{
-    render_resource::{encase::internal::WriteInto, Buffer, ShaderSize},
+    render_resource::{Buffer, ShaderSize, encase::internal::WriteInto},
     renderer::RenderQueue,
 };
-use std::{hash::Hash, ops::Range};
+use std::ops::Range;
 
-pub(crate) fn boxtree_properties<
-    #[cfg(all(feature = "bytecode", feature = "serialization"))] T: FromBencode
-        + ToBencode
-        + Serialize
-        + DeserializeOwned
-        + Default
-        + Eq
-        + Clone
-        + Hash
-        + VoxelData,
-    #[cfg(all(feature = "bytecode", not(feature = "serialization")))] T: Default + Eq + Clone + Hash + VoxelData,
-    #[cfg(all(not(feature = "bytecode"), feature = "serialization"))] T: Serialize + DeserializeOwned + Default + Eq + Clone + Hash + VoxelData,
-    #[cfg(all(not(feature = "bytecode"), not(feature = "serialization")))] T: Default + Eq + Clone + Hash + VoxelData,
->(
-    tree: &BoxTree<T>,
-) -> u32 {
+pub(crate) fn boxtree_properties<T: VoxelData>(tree: &BoxTree<T>) -> u32 {
     (tree.brick_dim & 0x0000FFFF) | ((tree.mip_map_strategy.is_enabled() as u32) << 16)
 }
 
