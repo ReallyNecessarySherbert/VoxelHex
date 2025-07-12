@@ -1,6 +1,5 @@
 use voxelhex::boxtree::{V3c, V3cf32};
 
-pub(crate) const OOB_SECTANT: u8 = 64;
 pub(crate) const BOX_NODE_DIMENSION: usize = 4;
 pub(crate) const BOX_NODE_CHILDREN_COUNT: usize = 64;
 
@@ -58,26 +57,6 @@ fn sectant_after_step(step_vector: &V3c<i32>, sectant: usize) -> u8 {
     let sectant_center = sectant_offset + V3c::unit(sectant_size / 2.);
     let center_after_step = sectant_center + V3c::unit(sectant_size) * step_signum;
 
-    if 0 == sectant {
-        println!(
-            "{:?} -{:?}-> {:?} ==> {:?}",
-            sectant_center,
-            step_signum,
-            center_after_step,
-            if center_after_step.x < 0.
-                || center_after_step.x > 1.
-                || center_after_step.y < 0.
-                || center_after_step.y > 1.
-                || center_after_step.z < 0.
-                || center_after_step.z > 1.
-            {
-                OOB_SECTANT
-            } else {
-                hash_region(&center_after_step, 1.)
-            }
-        );
-    }
-
     if center_after_step.x < 0.
         || center_after_step.x > 1.
         || center_after_step.y < 0.
@@ -85,7 +64,30 @@ fn sectant_after_step(step_vector: &V3c<i32>, sectant: usize) -> u8 {
         || center_after_step.z < 0.
         || center_after_step.z > 1.
     {
-        OOB_SECTANT
+        // calculate wraparound sectant
+        let mut center_after_step = V3c::new(
+            center_after_step.x % 1.,
+            center_after_step.y % 1.,
+            center_after_step.z % 1.,
+        );
+
+        if center_after_step.x < 0. {
+            center_after_step.x += 1.;
+        }
+        if center_after_step.y < 0. {
+            center_after_step.y += 1.;
+        }
+        if center_after_step.z < 0. {
+            center_after_step.z += 1.;
+        }
+
+        debug_assert!(
+            (BOX_NODE_CHILDREN_COUNT + hash_region(&center_after_step, 1.) as usize)
+                < u8::MAX as usize,
+            "Expected resulting sectant to be within the boundaries of u8"
+        );
+
+        BOX_NODE_CHILDREN_COUNT as u8 + hash_region(&center_after_step, 1.)
     } else {
         hash_region(&center_after_step, 1.)
     }
@@ -142,7 +144,7 @@ fn main() {
             }
         }
         print!(")");
-        if sectant < (OOB_SECTANT as usize - 1) {
+        if sectant < (BOX_NODE_CHILDREN_COUNT - 1) {
             print!(",");
         }
         println!();

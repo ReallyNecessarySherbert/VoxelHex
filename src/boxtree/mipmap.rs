@@ -6,7 +6,7 @@ use crate::{
             BoxTreeEntry, BrickData, MIPMapStrategy, MIPResamplingMethods, NodeChildren,
             NodeContent, PaletteIndexValues, StrategyUpdater,
         },
-        Albedo, BoxTree, VoxelData, BOX_NODE_DIMENSION, OOB_SECTANT,
+        Albedo, BoxTree, VoxelData, BOX_NODE_CHILDREN_COUNT, BOX_NODE_DIMENSION,
     },
     object_pool::empty_marker,
     spatial::{
@@ -575,14 +575,14 @@ impl<
         let mut node_stack = vec![(
             BoxTree::<T>::ROOT_NODE_KEY as usize,
             Cube::root_bounds(self.0.boxtree_size as f32),
-            0,
+            0u8,
         )];
         while !node_stack.is_empty() {
             let tree = &mut self.0;
             let (current_node_key, current_bounds, target_sectant) = node_stack.last().unwrap();
 
             // evaluate current node and return to its parent node
-            if OOB_SECTANT == *target_sectant {
+            if BOX_NODE_CHILDREN_COUNT <= *target_sectant as usize {
                 self.recalculate_mip(*current_node_key, current_bounds);
                 node_stack.pop();
                 if let Some(parent) = node_stack.last_mut() {
@@ -627,7 +627,7 @@ impl<
                         tree.node_children[*current_node_key]
                     );
                     // Set current child iterator to OOB, to evaluate it and move on
-                    node_stack.last_mut().unwrap().2 = OOB_SECTANT;
+                    node_stack.last_mut().unwrap().2 = BOX_NODE_CHILDREN_COUNT as u8;
                 }
             }
         }
@@ -672,11 +672,11 @@ impl<
 
     #[cfg(test)]
     /// Sample the MIP of the root node, or its children
-    /// * `sectant` - the child to sample, in case `OOB_SECTANT` the root MIP is sampled
+    /// * `sectant` - the child to sample, in case `BOX_NODE_CHILDREN_COUNT` the root MIP is sampled
     /// * `position` - the position inside the MIP, expected to be in range `0..self.brick_dim` for all components
     pub(crate) fn sample_root_mip(&self, sectant: u8, position: &V3c<u32>) -> BoxTreeEntry<T> {
         let tree = &self.0;
-        let node_key: usize = if OOB_SECTANT == sectant {
+        let node_key: usize = if BOX_NODE_CHILDREN_COUNT <= sectant as usize {
             BoxTree::<T>::ROOT_NODE_KEY as usize
         } else {
             tree.node_children[BoxTree::<T>::ROOT_NODE_KEY as usize].child(sectant) as usize

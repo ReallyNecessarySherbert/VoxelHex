@@ -1,5 +1,7 @@
 #[cfg(test)]
+#[cfg(feature = "bevy_wgpu")]
 mod brick_tests {
+
     use crate::{boxtree::V3c, spatial::Cube};
 
     #[test]

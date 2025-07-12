@@ -1,11 +1,19 @@
 use crate::{
     boxtree::{
-        types::NodeContent, Albedo, BoxTree, MIPResamplingMethods, VoxelData, BOX_NODE_DIMENSION,
+        types::NodeContent, Albedo, BoxTree, MIPResamplingMethods, VoxelData,
+        BOX_NODE_CHILDREN_COUNT, BOX_NODE_DIMENSION,
     },
-    spatial::{math::vector::V3c, Cube},
+    spatial::{
+        math::vector::{V3c, V3cf32},
+        raytracing::step_sectant,
+        Cube,
+    },
 };
 use bendy::{decoding::FromBencode, encoding::ToBencode};
-use std::{collections::HashMap, hash::Hash};
+use std::{
+    collections::{HashMap, VecDeque},
+    hash::Hash,
+};
 
 pub(crate) trait MIPResamplingFunction {
     /// Provides a color value from the given range acquired from the sampling function
@@ -128,6 +136,139 @@ impl<
         #[cfg(all(not(feature = "bytecode"), not(feature = "serialization")))] T: Default + Eq + Clone + Hash + VoxelData,
     > BoxTree<T>
 {
+    /// Provides the path to the given node from the root node
+    pub(crate) fn get_access_stack_for(
+        &self,
+        node_key: usize,
+        node_position: V3cf32,
+    ) -> Vec<(usize, u8)> {
+        let mut current_bounds = Cube::root_bounds(self.boxtree_size as f32);
+        let mut node_stack = vec![(
+            Self::ROOT_NODE_KEY as usize,
+            current_bounds.sectant_for(&node_position),
+        )];
+        loop {
+            let (current_node_key, current_sectant) = node_stack.last().unwrap();
+            if *current_node_key == node_key {
+                return node_stack;
+            }
+
+            match self.nodes.get(*current_node_key) {
+                NodeContent::Nothing => {
+                    unreachable!("Access stack for node landed on empty parent node")
+                }
+                NodeContent::Leaf(_) => {
+                    unreachable!("Access stack for node landed on leaf parent node")
+                }
+                NodeContent::UniformLeaf(_) => {
+                    unreachable!("Access stack for node landed on uniform leaf parent node")
+                }
+                NodeContent::Internal(_occupied_bits) => {
+                    // Hash the position to the target child
+                    let child_at_position =
+                        self.node_children[*current_node_key].child(*current_sectant);
+
+                    // There is a valid child at the given position inside the node, recurse into it
+                    if self.nodes.key_is_valid(child_at_position) {
+                        current_bounds = current_bounds.child_bounds_for(*current_sectant);
+                        node_stack.push((
+                            child_at_position,
+                            current_bounds.sectant_for(&node_position),
+                        ));
+                    } else {
+                        unreachable!("Access stack for node landed on invalid parent node");
+                    }
+                }
+            }
+        }
+    }
+
+    /// Provides the sibling of the given node in the given direction, if it exists and not ambigous
+    /// Behavior undefined when the sibling of a larger level leaf node is queried, see #34
+    /// It might return with a leaf node on a higher level, than the given node
+    pub(crate) fn get_sibling_by_position(
+        &self,
+        node_key: usize,
+        direction: V3c<f32>,
+        node_position: &V3cf32,
+    ) -> Option<(usize, u8)> {
+        let node_stack = self.get_access_stack_for(node_key, *node_position);
+        self.get_sibling_by_stack(direction, &node_stack)
+    }
+
+    /// Provides the sibling of the given node in the given direction, if it exists and not ambigous
+    /// It might return with a leaf node on a higher level, than the given node
+    /// Behavior undefined when the sibling of a larger level leaf node is queried, see #34
+    /// It uses the given node_stack, which is re-usable for nodes
+    pub(crate) fn get_sibling_by_stack(
+        &self,
+        direction: V3c<f32>,
+        node_stack: &Vec<(usize, u8)>,
+    ) -> Option<(usize, u8)> {
+        let mut current_sectant = node_stack
+            .last()
+            .expect("Expected given node_stack to contain entries!")
+            .1;
+        let mut next_sectant = step_sectant(current_sectant, direction);
+        let mut node_stack = node_stack.clone();
+        let mut mirror_stack = VecDeque::<u8>::new();
+
+        // Collect sibling sectants on each level
+        while !node_stack.is_empty() && (next_sectant as usize) >= BOX_NODE_CHILDREN_COUNT {
+            // At this point the sibling child is out of node bounds
+            // while a common parent may still exist in the hierarchy ( node stack is not empty )
+
+            // convert the sibling sectant to internal, and store it
+            let mirror_sectant = next_sectant - BOX_NODE_CHILDREN_COUNT as u8;
+            mirror_stack.push_front(mirror_sectant);
+
+            // go up a level, and step the parent sectant in the given direction
+            if let Some((parent_key, parent_sectant)) = node_stack.pop() {
+                current_sectant = parent_sectant;
+                next_sectant = step_sectant(current_sectant, direction);
+
+                if (next_sectant as usize) < BOX_NODE_CHILDREN_COUNT {
+                    node_stack.push((parent_key, next_sectant));
+                }
+            }
+        }
+
+        // even the root node pushed out of bounds
+        // there is no sibling in that direction!
+        if node_stack.is_empty() {
+            return None;
+        }
+
+        // Adding the internal sibling sectant to the mirror stack
+        // So the front of the mirror stack lines up with
+        // the end of the node_stack
+        mirror_stack.push_front(next_sectant);
+
+        // starting from the last node in the original stack
+        // traverse down the mirror stack to the desired node level
+        let mut node_key = node_stack.last().unwrap().0;
+        for target_sectant in mirror_stack.iter() {
+            let child_at_position = self.node_children[node_key].child(*target_sectant);
+            if self.nodes.key_is_valid(child_at_position) {
+                node_key = child_at_position;
+                next_sectant = *target_sectant;
+            } else if matches!(self.nodes.get(node_key), NodeContent::Leaf(_)) {
+                // leaf nodes don't have valid node children, but sectant can still have valid siblings
+                return Some((node_key, *target_sectant));
+            } else if matches!(self.nodes.get(node_key), NodeContent::UniformLeaf(_)) {
+                // leaf nodes above the hierarchy next to original node count as siblings
+                // even if the opposite is not true
+                return Some((node_key, BOX_NODE_CHILDREN_COUNT as u8));
+            } else {
+                // Node inside sibling hierarchy is invalid
+                return None;
+            }
+        }
+
+        return Some((node_key, next_sectant));
+    }
+
+    /// Provides the key of the child node at the given position on the lowest level inside the given parent node
     pub(crate) fn get_node_internal(
         &self,
         mut current_node_key: usize,

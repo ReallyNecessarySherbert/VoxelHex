@@ -1,8 +1,442 @@
 mod iterate_tests {
     use crate::{
-        boxtree::{iterate::execute_for_relevant_sectants, BOX_NODE_DIMENSION},
-        spatial::{math::vector::V3c, Cube},
+        boxtree::{
+            iterate::execute_for_relevant_sectants, Albedo, BoxTree, BOX_NODE_CHILDREN_COUNT,
+            BOX_NODE_DIMENSION,
+        },
+        make_tree,
+        spatial::{math::vector::V3c, raytracing::step_sectant, Cube},
     };
+
+    #[test]
+    fn test_sibling_jump_to_internal_sibling() {
+        const BRICK_DIM: u32 = 4;
+        let mut tree: BoxTree = make_tree!(1024, BRICK_DIM);
+        let start_position = V3c::new(507, 331, 0);
+        let sibling_position = start_position + V3c::new(BRICK_DIM, 0, 0);
+        let step_direction = V3c::new(1., 0., 0.);
+
+        tree.insert(
+            &start_position,
+            &Albedo::default().with_red(100).with_alpha(255),
+        )
+        .expect("Expected to be able to update Boxtree");
+
+        tree.insert(
+            &sibling_position,
+            &Albedo::default().with_red(100).with_alpha(255),
+        )
+        .expect("Expected to be able to update Boxtree");
+
+        let start_node = tree
+            .get_node_internal(
+                BoxTree::<u32>::ROOT_NODE_KEY as usize,
+                &mut Cube::root_bounds(1024.),
+                &(start_position.into()),
+            )
+            .expect("Expected start node to exist");
+        let node_stack_for_start_node =
+            tree.get_access_stack_for(start_node, start_position.into());
+        let start_sectant = node_stack_for_start_node
+            .last()
+            .expect("Expected start node access stack to be non-empty")
+            .1;
+
+        let sibling_node = tree
+            .get_node_internal(
+                BoxTree::<u32>::ROOT_NODE_KEY as usize,
+                &mut Cube::root_bounds(1024.),
+                &(sibling_position.into()),
+            )
+            .expect("Expected sibling node to exist");
+        let node_stack_for_sibling_node =
+            tree.get_access_stack_for(sibling_node, sibling_position.into());
+        let sibling_sectant = node_stack_for_sibling_node
+            .last()
+            .expect("Expected sibling node access stack to be non-empty")
+            .1;
+
+        assert_eq!(
+            start_node, sibling_node,
+            "Start and sibling nodes should not differ"
+        );
+        assert_ne!(
+            start_sectant, sibling_sectant,
+            "Start and sibling node target sectants should differ"
+        );
+
+        // get target sectant of starting node
+        let (queried_sibling_node, queried_sibling_sectant) = tree
+            .get_sibling_by_position(start_node, step_direction, &(start_position.into()))
+            .expect(
+                &format!(
+                    "Expected to be able to query sibling node in the direction {:?}",
+                    step_direction
+                )
+                .to_string(),
+            );
+        assert_eq!(queried_sibling_node, sibling_node);
+        assert_eq!(
+            queried_sibling_sectant,
+            step_sectant(start_sectant, step_direction)
+        );
+
+        // Check result with the other interface too
+        let (queried_sibling_node, queried_sibling_sectant) = tree
+            .get_sibling_by_stack(step_direction, &node_stack_for_start_node)
+            .expect(
+                &format!(
+                    "Expected to be able to query sibling node in the direction {:?}",
+                    step_direction
+                )
+                .to_string(),
+            );
+
+        assert_eq!(queried_sibling_node, sibling_node);
+        assert_eq!(
+            queried_sibling_sectant,
+            step_sectant(start_sectant, step_direction)
+        );
+    }
+
+    #[test]
+    fn test_sibling_jump_to_hit_in_parent() {
+        const BRICK_DIM: u32 = 4;
+        let mut tree: BoxTree = make_tree!(1024, BRICK_DIM);
+        let start_position = V3c::new(495, 331, 0);
+        let sibling_position = V3c::new(496, 331, 0);
+        let step_direction = V3c::new(1., 0., 0.);
+
+        tree.insert(
+            &start_position,
+            &Albedo::default().with_red(100).with_alpha(255),
+        )
+        .expect("Expected to be able to update Boxtree");
+
+        tree.insert(
+            &sibling_position,
+            &Albedo::default().with_red(100).with_alpha(255),
+        )
+        .expect("Expected to be able to update Boxtree");
+
+        let start_node = tree
+            .get_node_internal(
+                BoxTree::<u32>::ROOT_NODE_KEY as usize,
+                &mut Cube::root_bounds(1024.),
+                &(start_position.into()),
+            )
+            .expect("Expected start node to exist");
+        let node_stack_for_start_node =
+            tree.get_access_stack_for(start_node, start_position.into());
+        let start_sectant = node_stack_for_start_node
+            .last()
+            .expect("Expected start node access stack to be non-empty")
+            .1;
+
+        let sibling_node = tree
+            .get_node_internal(
+                BoxTree::<u32>::ROOT_NODE_KEY as usize,
+                &mut Cube::root_bounds(1024.),
+                &(sibling_position.into()),
+            )
+            .expect("Expected sibling node to exist");
+        let node_stack_for_sibling_node =
+            tree.get_access_stack_for(sibling_node, sibling_position.into());
+        let sibling_sectant = node_stack_for_sibling_node
+            .last()
+            .expect("Expected sibling node access stack to be non-empty")
+            .1;
+
+        assert_ne!(
+            start_node, sibling_node,
+            "Start and sibling nodes should differ"
+        );
+        assert_ne!(
+            start_sectant, sibling_sectant,
+            "Start and sibling node target sectants should differ"
+        );
+
+        // get target sectant of starting node
+        let (queried_sibling_node, queried_sibling_sectant) = tree
+            .get_sibling_by_position(start_node, step_direction, &(start_position.into()))
+            .expect(
+                &format!(
+                    "Expected to be able to query sibling node in the direction {:?}",
+                    step_direction
+                )
+                .to_string(),
+            );
+        assert_eq!(queried_sibling_node, sibling_node);
+        assert_eq!(
+            queried_sibling_sectant,
+            step_sectant(start_sectant, step_direction) - BOX_NODE_CHILDREN_COUNT as u8
+        );
+
+        // Check result with the other interface too
+        let (queried_sibling_node, queried_sibling_sectant) = tree
+            .get_sibling_by_stack(step_direction, &node_stack_for_start_node)
+            .expect(
+                &format!(
+                    "Expected to be able to query sibling node in the direction {:?}",
+                    step_direction
+                )
+                .to_string(),
+            );
+
+        assert_eq!(queried_sibling_node, sibling_node);
+        assert_eq!(
+            queried_sibling_sectant,
+            step_sectant(start_sectant, step_direction) - BOX_NODE_CHILDREN_COUNT as u8
+        );
+    }
+
+    #[test]
+    fn test_sibling_jump_to_hit_in_root() {
+        const BRICK_DIM: u32 = 4;
+        let mut tree: BoxTree = make_tree!(1024, BRICK_DIM);
+        let start_position = V3c::new(511, 331, 0);
+        let sibling_position = V3c::new(512, 331, 0);
+        let step_direction = V3c::new(1., 0., 0.);
+
+        tree.insert(
+            &start_position,
+            &Albedo::default().with_red(100).with_alpha(255),
+        )
+        .expect("Expected to be able to update Boxtree");
+
+        tree.insert(
+            &sibling_position,
+            &Albedo::default().with_red(100).with_alpha(255),
+        )
+        .expect("Expected to be able to update Boxtree");
+
+        let start_node = tree
+            .get_node_internal(
+                BoxTree::<u32>::ROOT_NODE_KEY as usize,
+                &mut Cube::root_bounds(1024.),
+                &(start_position.into()),
+            )
+            .expect("Expected start node to exist");
+        let node_stack_for_start_node =
+            tree.get_access_stack_for(start_node, start_position.into());
+        let start_sectant = node_stack_for_start_node
+            .last()
+            .expect("Expected start node access stack to be non-empty")
+            .1;
+
+        let sibling_node = tree
+            .get_node_internal(
+                BoxTree::<u32>::ROOT_NODE_KEY as usize,
+                &mut Cube::root_bounds(1024.),
+                &(sibling_position.into()),
+            )
+            .expect("Expected sibling node to exist");
+
+        let _ = tree.get_access_stack_for(sibling_node, sibling_position.into());
+        println!(
+            "start vs sibling: {start_node}, {:?} <> {sibling_node}, {:?}",
+            start_position, sibling_position
+        );
+
+        assert_ne!(
+            start_node, sibling_node,
+            "Start and sibling nodes should differ"
+        );
+
+        // get target sectant of starting node
+        let (queried_sibling_node, queried_sibling_sectant) = tree
+            .get_sibling_by_position(start_node, step_direction, &(start_position.into()))
+            .expect(
+                &format!(
+                    "Expected to be able to query sibling node in the direction {:?}",
+                    step_direction
+                )
+                .to_string(),
+            );
+        assert_eq!(queried_sibling_node, sibling_node);
+        assert_eq!(
+            queried_sibling_sectant,
+            step_sectant(start_sectant, step_direction) - BOX_NODE_CHILDREN_COUNT as u8
+        );
+
+        // Check result with the other interface too
+        let (queried_sibling_node, queried_sibling_sectant) = tree
+            .get_sibling_by_stack(step_direction, &node_stack_for_start_node)
+            .expect(
+                &format!(
+                    "Expected to be able to query sibling node in the direction {:?}",
+                    step_direction
+                )
+                .to_string(),
+            );
+
+        assert_eq!(queried_sibling_node, sibling_node);
+        assert_eq!(
+            queried_sibling_sectant,
+            step_sectant(start_sectant, step_direction) - BOX_NODE_CHILDREN_COUNT as u8
+        );
+    }
+
+    #[test]
+    fn test_sibling_jump_to_higher_level_leaf() {
+        const BRICK_DIM: u32 = 4;
+        let mut tree: BoxTree = make_tree!(1024, BRICK_DIM);
+        let start_position = V3c::new(511, 0, 0);
+        let sibling_position = V3c::new(512, 0, 0);
+        let step_direction = V3c::new(1., 0., 0.);
+
+        tree.insert(
+            &start_position,
+            &Albedo::default().with_red(100).with_alpha(255),
+        )
+        .expect("Expected to be able to update Boxtree");
+
+        tree.insert_at_lod(
+            &sibling_position,
+            256,
+            &Albedo::default().with_red(100).with_alpha(255),
+        )
+        .expect("Expected to be able to update Boxtree");
+
+        let start_node = tree
+            .get_node_internal(
+                BoxTree::<u32>::ROOT_NODE_KEY as usize,
+                &mut Cube::root_bounds(1024.),
+                &(start_position.into()),
+            )
+            .expect("Expected start node to exist");
+        let node_stack_for_start_node =
+            tree.get_access_stack_for(start_node, start_position.into());
+        let start_sectant = node_stack_for_start_node
+            .last()
+            .expect("Expected start node access stack to be non-empty")
+            .1;
+
+        let sibling_node = tree
+            .get_node_internal(
+                BoxTree::<u32>::ROOT_NODE_KEY as usize,
+                &mut Cube::root_bounds(1024.),
+                &(sibling_position.into()),
+            )
+            .expect("Expected sibling node to exist");
+        let node_stack_for_sibling_node =
+            tree.get_access_stack_for(sibling_node, sibling_position.into());
+        let sibling_sectant = node_stack_for_sibling_node
+            .last()
+            .expect("Expected sibling node access stack to be non-empty")
+            .1;
+
+        assert_ne!(
+            start_node, sibling_node,
+            "Start and sibling nodes should differ"
+        );
+        assert_ne!(
+            start_sectant, sibling_sectant,
+            "Start and sibling node target sectants should differ"
+        );
+
+        // get target sectant of starting node
+        let (queried_sibling_node, queried_sibling_sectant) = tree
+            .get_sibling_by_position(start_node, step_direction, &(start_position.into()))
+            .expect(
+                &format!(
+                    "Expected to be able to query sibling node in the direction {:?}",
+                    step_direction
+                )
+                .to_string(),
+            );
+        assert_eq!(queried_sibling_node, sibling_node);
+        assert_eq!(queried_sibling_sectant, BOX_NODE_CHILDREN_COUNT as u8);
+
+        // Check result with the other interface too
+        let (queried_sibling_node, queried_sibling_sectant) = tree
+            .get_sibling_by_stack(step_direction, &node_stack_for_start_node)
+            .expect(
+                &format!(
+                    "Expected to be able to query sibling node in the direction {:?}",
+                    step_direction
+                )
+                .to_string(),
+            );
+
+        assert_eq!(queried_sibling_node, sibling_node);
+        assert_eq!(queried_sibling_sectant, BOX_NODE_CHILDREN_COUNT as u8);
+    }
+
+    #[test]
+    #[ignore = "FIXME: Undefined behavior, fix in #34"]
+    fn test_sibling_jump_from_higher_level_leaf() {
+        const BRICK_DIM: u32 = 4;
+        let mut tree: BoxTree = make_tree!(1024, BRICK_DIM);
+        let start_position = V3c::new(256, 0, 0);
+        let sibling_position = V3c::new(512, 0, 0);
+        let step_direction = V3c::new(1., 0., 0.);
+
+        tree.insert_at_lod(
+            &start_position,
+            256,
+            &Albedo::default().with_red(100).with_alpha(255),
+        )
+        .expect("Expected to be able to update Boxtree");
+
+        tree.insert(
+            &sibling_position,
+            &Albedo::default().with_red(100).with_alpha(255),
+        )
+        .expect("Expected to be able to update Boxtree");
+
+        let start_node = tree
+            .get_node_internal(
+                BoxTree::<u32>::ROOT_NODE_KEY as usize,
+                &mut Cube::root_bounds(1024.),
+                &(start_position.into()),
+            )
+            .expect("Expected start node to exist");
+        let node_stack_for_start_node =
+            tree.get_access_stack_for(start_node, start_position.into());
+
+        assert!(tree
+            .get_sibling_by_position(start_node, step_direction, &(start_position.into()),)
+            .is_none());
+
+        // Check result with the other interface too
+        assert!(tree
+            .get_sibling_by_stack(step_direction, &node_stack_for_start_node)
+            .is_none());
+    }
+
+    #[test]
+    fn test_sibling_jump_out_of_bounds() {
+        const BRICK_DIM: u32 = 4;
+        let mut tree: BoxTree = make_tree!(1024, BRICK_DIM);
+        let start_position = V3c::new(1023, 331, 0);
+        let step_direction = V3c::new(1., 0., 0.);
+
+        tree.insert(
+            &start_position,
+            &Albedo::default().with_red(100).with_alpha(255),
+        )
+        .expect("Expected to be able to update Boxtree");
+
+        let start_node = tree
+            .get_node_internal(
+                BoxTree::<u32>::ROOT_NODE_KEY as usize,
+                &mut Cube::root_bounds(1024.),
+                &(start_position.into()),
+            )
+            .expect("Expected start node to exist");
+        let node_stack_for_start_node =
+            tree.get_access_stack_for(start_node, start_position.into());
+
+        assert!(tree
+            .get_sibling_by_position(start_node, step_direction, &(start_position.into()),)
+            .is_none());
+
+        // Check result with the other interface too
+        assert!(tree
+            .get_sibling_by_stack(step_direction, &node_stack_for_start_node)
+            .is_none());
+    }
 
     #[test]
     fn test_sectant_execution_aligned_single_within() {
@@ -408,7 +842,7 @@ mod iterate_tests {
 }
 
 mod mipmap_tests {
-    use crate::boxtree::{Albedo, BoxTree, MIPResamplingMethods, V3c, OOB_SECTANT};
+    use crate::boxtree::{Albedo, BoxTree, MIPResamplingMethods, V3c, BOX_NODE_CHILDREN_COUNT};
 
     #[test]
     fn test_mixed_mip_lvl1() {
@@ -442,14 +876,14 @@ mod mipmap_tests {
 
         assert!(tree
             .albedo_mip_map_resampling_strategy()
-            .sample_root_mip(OOB_SECTANT, &V3c::new(0, 0, 0))
+            .sample_root_mip(BOX_NODE_CHILDREN_COUNT as u8, &V3c::new(0, 0, 0))
             .albedo()
             .is_some());
         assert_eq!(
             mix,
             *tree
                 .albedo_mip_map_resampling_strategy()
-                .sample_root_mip(OOB_SECTANT, &V3c::new(0, 0, 0))
+                .sample_root_mip(BOX_NODE_CHILDREN_COUNT as u8, &V3c::new(0, 0, 0))
                 .albedo()
                 .unwrap()
         );
@@ -487,14 +921,14 @@ mod mipmap_tests {
 
         assert!(tree
             .albedo_mip_map_resampling_strategy()
-            .sample_root_mip(OOB_SECTANT, &V3c::new(31, 31, 31))
+            .sample_root_mip(BOX_NODE_CHILDREN_COUNT as u8, &V3c::new(31, 31, 31))
             .albedo()
             .is_some());
         assert_eq!(
             mix,
             *tree
                 .albedo_mip_map_resampling_strategy()
-                .sample_root_mip(OOB_SECTANT, &V3c::new(31, 31, 31))
+                .sample_root_mip(BOX_NODE_CHILDREN_COUNT as u8, &V3c::new(31, 31, 31))
                 .albedo()
                 .unwrap()
         );
@@ -524,50 +958,50 @@ mod mipmap_tests {
 
         assert!(tree
             .albedo_mip_map_resampling_strategy()
-            .sample_root_mip(OOB_SECTANT, &V3c::new(0, 0, 0))
+            .sample_root_mip(BOX_NODE_CHILDREN_COUNT as u8, &V3c::new(0, 0, 0))
             .albedo()
             .is_some());
         assert_eq!(
             red,
             *tree
                 .albedo_mip_map_resampling_strategy()
-                .sample_root_mip(OOB_SECTANT, &V3c::new(0, 0, 0))
+                .sample_root_mip(BOX_NODE_CHILDREN_COUNT as u8, &V3c::new(0, 0, 0))
                 .albedo()
                 .unwrap()
         );
         assert!(tree
             .albedo_mip_map_resampling_strategy()
-            .sample_root_mip(OOB_SECTANT, &V3c::new(0, 0, 1))
+            .sample_root_mip(BOX_NODE_CHILDREN_COUNT as u8, &V3c::new(0, 0, 1))
             .albedo()
             .is_none());
         assert!(tree
             .albedo_mip_map_resampling_strategy()
-            .sample_root_mip(OOB_SECTANT, &V3c::new(0, 1, 0))
+            .sample_root_mip(BOX_NODE_CHILDREN_COUNT as u8, &V3c::new(0, 1, 0))
             .albedo()
             .is_none());
         assert!(tree
             .albedo_mip_map_resampling_strategy()
-            .sample_root_mip(OOB_SECTANT, &V3c::new(0, 1, 1))
+            .sample_root_mip(BOX_NODE_CHILDREN_COUNT as u8, &V3c::new(0, 1, 1))
             .albedo()
             .is_none());
         assert!(tree
             .albedo_mip_map_resampling_strategy()
-            .sample_root_mip(OOB_SECTANT, &V3c::new(1, 0, 0))
+            .sample_root_mip(BOX_NODE_CHILDREN_COUNT as u8, &V3c::new(1, 0, 0))
             .albedo()
             .is_none());
         assert!(tree
             .albedo_mip_map_resampling_strategy()
-            .sample_root_mip(OOB_SECTANT, &V3c::new(1, 0, 1))
+            .sample_root_mip(BOX_NODE_CHILDREN_COUNT as u8, &V3c::new(1, 0, 1))
             .albedo()
             .is_none());
         assert!(tree
             .albedo_mip_map_resampling_strategy()
-            .sample_root_mip(OOB_SECTANT, &V3c::new(1, 1, 0))
+            .sample_root_mip(BOX_NODE_CHILDREN_COUNT as u8, &V3c::new(1, 1, 0))
             .albedo()
             .is_none());
         assert!(tree
             .albedo_mip_map_resampling_strategy()
-            .sample_root_mip(OOB_SECTANT, &V3c::new(1, 1, 1))
+            .sample_root_mip(BOX_NODE_CHILDREN_COUNT as u8, &V3c::new(1, 1, 1))
             .albedo()
             .is_none());
     }
@@ -604,50 +1038,50 @@ mod mipmap_tests {
 
         assert!(tree
             .albedo_mip_map_resampling_strategy()
-            .sample_root_mip(OOB_SECTANT, &V3c::new(0, 0, 0))
+            .sample_root_mip(BOX_NODE_CHILDREN_COUNT as u8, &V3c::new(0, 0, 0))
             .albedo()
             .is_some());
         assert_eq!(
             mix,
             *tree
                 .albedo_mip_map_resampling_strategy()
-                .sample_root_mip(OOB_SECTANT, &V3c::new(0, 0, 0))
+                .sample_root_mip(BOX_NODE_CHILDREN_COUNT as u8, &V3c::new(0, 0, 0))
                 .albedo()
                 .unwrap()
         );
         assert!(tree
             .albedo_mip_map_resampling_strategy()
-            .sample_root_mip(OOB_SECTANT, &V3c::new(0, 0, 1))
+            .sample_root_mip(BOX_NODE_CHILDREN_COUNT as u8, &V3c::new(0, 0, 1))
             .albedo()
             .is_none());
         assert!(tree
             .albedo_mip_map_resampling_strategy()
-            .sample_root_mip(OOB_SECTANT, &V3c::new(0, 1, 0))
+            .sample_root_mip(BOX_NODE_CHILDREN_COUNT as u8, &V3c::new(0, 1, 0))
             .albedo()
             .is_none());
         assert!(tree
             .albedo_mip_map_resampling_strategy()
-            .sample_root_mip(OOB_SECTANT, &V3c::new(0, 1, 1))
+            .sample_root_mip(BOX_NODE_CHILDREN_COUNT as u8, &V3c::new(0, 1, 1))
             .albedo()
             .is_none());
         assert!(tree
             .albedo_mip_map_resampling_strategy()
-            .sample_root_mip(OOB_SECTANT, &V3c::new(1, 0, 0))
+            .sample_root_mip(BOX_NODE_CHILDREN_COUNT as u8, &V3c::new(1, 0, 0))
             .albedo()
             .is_none());
         assert!(tree
             .albedo_mip_map_resampling_strategy()
-            .sample_root_mip(OOB_SECTANT, &V3c::new(1, 0, 1))
+            .sample_root_mip(BOX_NODE_CHILDREN_COUNT as u8, &V3c::new(1, 0, 1))
             .albedo()
             .is_none());
         assert!(tree
             .albedo_mip_map_resampling_strategy()
-            .sample_root_mip(OOB_SECTANT, &V3c::new(1, 1, 0))
+            .sample_root_mip(BOX_NODE_CHILDREN_COUNT as u8, &V3c::new(1, 1, 0))
             .albedo()
             .is_none());
         assert!(tree
             .albedo_mip_map_resampling_strategy()
-            .sample_root_mip(OOB_SECTANT, &V3c::new(1, 1, 1))
+            .sample_root_mip(BOX_NODE_CHILDREN_COUNT as u8, &V3c::new(1, 1, 1))
             .albedo()
             .is_none());
     }
@@ -738,14 +1172,14 @@ mod mipmap_tests {
         // root mip position 0,0,0
         assert!(tree
             .albedo_mip_map_resampling_strategy()
-            .sample_root_mip(OOB_SECTANT, &V3c::new(0, 0, 0))
+            .sample_root_mip(BOX_NODE_CHILDREN_COUNT as u8, &V3c::new(0, 0, 0))
             .albedo()
             .is_some());
         assert_eq!(
             rg_mix,
             *tree
                 .albedo_mip_map_resampling_strategy()
-                .sample_root_mip(OOB_SECTANT, &V3c::new(0, 0, 0))
+                .sample_root_mip(BOX_NODE_CHILDREN_COUNT as u8, &V3c::new(0, 0, 0))
                 .albedo()
                 .unwrap()
         );
@@ -753,14 +1187,14 @@ mod mipmap_tests {
         // root mip position 16,0,0
         assert!(tree
             .albedo_mip_map_resampling_strategy()
-            .sample_root_mip(OOB_SECTANT, &V3c::new(1, 0, 0))
+            .sample_root_mip(BOX_NODE_CHILDREN_COUNT as u8, &V3c::new(1, 0, 0))
             .albedo()
             .is_some());
         assert_eq!(
             rgb_mix,
             *tree
                 .albedo_mip_map_resampling_strategy()
-                .sample_root_mip(OOB_SECTANT, &V3c::new(1, 0, 0))
+                .sample_root_mip(BOX_NODE_CHILDREN_COUNT as u8, &V3c::new(1, 0, 0))
                 .albedo()
                 .unwrap()
         );
@@ -855,14 +1289,14 @@ mod mipmap_tests {
         // root mip position 0,0,0
         assert!(tree
             .albedo_mip_map_resampling_strategy()
-            .sample_root_mip(OOB_SECTANT, &V3c::new(0, 0, 0))
+            .sample_root_mip(BOX_NODE_CHILDREN_COUNT as u8, &V3c::new(0, 0, 0))
             .albedo()
             .is_some());
         assert_eq!(
             rg_mix,
             *tree
                 .albedo_mip_map_resampling_strategy()
-                .sample_root_mip(OOB_SECTANT, &V3c::new(0, 0, 0))
+                .sample_root_mip(BOX_NODE_CHILDREN_COUNT as u8, &V3c::new(0, 0, 0))
                 .albedo()
                 .unwrap()
         );
@@ -870,14 +1304,14 @@ mod mipmap_tests {
         // root mip position 16,0,0
         assert!(tree
             .albedo_mip_map_resampling_strategy()
-            .sample_root_mip(OOB_SECTANT, &V3c::new(1, 0, 0))
+            .sample_root_mip(BOX_NODE_CHILDREN_COUNT as u8, &V3c::new(1, 0, 0))
             .albedo()
             .is_some());
         assert_eq!(
             rgb_mix,
             *tree
                 .albedo_mip_map_resampling_strategy()
-                .sample_root_mip(OOB_SECTANT, &V3c::new(1, 0, 0))
+                .sample_root_mip(BOX_NODE_CHILDREN_COUNT as u8, &V3c::new(1, 0, 0))
                 .albedo()
                 .unwrap()
         );

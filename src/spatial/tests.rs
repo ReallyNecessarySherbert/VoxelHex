@@ -1,6 +1,5 @@
 #[cfg(test)]
 mod vector_tests {
-
     use crate::spatial::V3c;
 
     #[test]
@@ -16,8 +15,10 @@ mod vector_tests {
 
 #[cfg(test)]
 mod sectant_tests {
-    use crate::spatial::math::offset_sectant;
-    use crate::spatial::V3c;
+    use crate::spatial::{math::offset_sectant, V3c};
+
+    #[cfg(feature = "raytracing")]
+    use crate::{boxtree::BOX_NODE_CHILDREN_COUNT, spatial::raytracing::step_sectant};
 
     #[test]
     fn test_hash_region() {
@@ -26,6 +27,43 @@ mod sectant_tests {
         assert_eq!(offset_sectant(&V3c::new(0.0, 3.0, 0.0), 12.0), 4);
         assert_eq!(offset_sectant(&V3c::new(0.0, 0.0, 3.0), 12.0), 16);
         assert_eq!(offset_sectant(&V3c::new(10.0, 10.0, 10.0), 12.0), 63);
+    }
+
+    #[test]
+    #[cfg(feature = "raytracing")]
+    fn test_step_sectant_internal() {
+        let bounds_size = 40.;
+        let start_sectant = offset_sectant(&V3c::new(0., 10., 0.), bounds_size);
+        assert_eq!(4, start_sectant);
+        assert_eq!(5, step_sectant(start_sectant, V3c::new(1., 0., 0.)));
+        assert_eq!(0, step_sectant(start_sectant, V3c::new(0., -1., 0.)));
+        assert_eq!(8, step_sectant(start_sectant, V3c::new(0., 1., 0.)));
+        assert_eq!(9, step_sectant(start_sectant, V3c::new(1., 1., 0.)));
+        assert_eq!(25, step_sectant(start_sectant, V3c::new(1., 1., 1.)));
+    }
+
+    #[test]
+    #[cfg(feature = "raytracing")]
+    fn test_step_sectant_wrap_around() {
+        let bounds_size = 40.;
+        let start_sectant = offset_sectant(&V3c::new(0., 0., 0.), bounds_size);
+        assert_eq!(0, start_sectant);
+        assert_eq!(
+            3,
+            step_sectant(start_sectant, V3c::new(-1., 0., 0.)) as usize - BOX_NODE_CHILDREN_COUNT
+        );
+        assert_eq!(
+            12,
+            step_sectant(start_sectant, V3c::new(0., -1., 0.)) as usize - BOX_NODE_CHILDREN_COUNT
+        );
+        assert_eq!(
+            48,
+            step_sectant(start_sectant, V3c::new(0., 0., -1.)) as usize - BOX_NODE_CHILDREN_COUNT
+        );
+        assert_eq!(
+            63,
+            step_sectant(start_sectant, V3c::new(-1., -1., -1.)) as usize - BOX_NODE_CHILDREN_COUNT
+        );
     }
 }
 

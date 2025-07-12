@@ -14,7 +14,6 @@ struct Cube {
     size: f32,
 }
 
-const OOB_SECTANT = 64u;
 const BOX_NODE_DIMENSION = 4u;
 const BOX_NODE_CHILDREN_COUNT = 64u;
 const FLOAT_ERROR_TOLERANCE = 0.00001;
@@ -536,7 +535,7 @@ fn get_by_ray(ray: ptr<function, Line>, start_distance: f32) -> OctreeRayInterse
     var current_bounds = Cube(vec3(0.), f32(boxtree_meta_data.boxtree_size));
     var target_bounds = current_bounds;
     var current_node_key = BOXTREE_ROOT_NODE_KEY;
-    var target_sectant = OOB_SECTANT;
+    var target_sectant = BOX_NODE_CHILDREN_COUNT;
 
     let root_intersect = cube_intersect_ray(current_bounds, ray);
     if(root_intersect.hit){
@@ -550,7 +549,7 @@ fn get_by_ray(ray: ptr<function, Line>, start_distance: f32) -> OctreeRayInterse
     var outer_safety = 0;
     */// --- DEBUG ---
     while(
-        target_sectant != OOB_SECTANT
+        target_sectant < BOX_NODE_CHILDREN_COUNT
         && dot(ray_current_point - (*ray).origin, ray_current_point - (*ray).origin) < max_distance
     ) {
         /*// +++ DEBUG +++
@@ -595,7 +594,7 @@ fn get_by_ray(ray: ptr<function, Line>, start_distance: f32) -> OctreeRayInterse
             var target_child_descriptor = node_children[(current_node_key * BOX_NODE_CHILDREN_COUNT) + target_sectant];
             if(
                 (0 != (boxtree_meta_data.tree_properties & 0x00010000)) // MIPs enabled
-                && target_sectant != OOB_SECTANT // node has a target poitning inwards
+                && target_sectant < BOX_NODE_CHILDREN_COUNT // node has a target pointing inwards
                 && target_child_descriptor == EMPTY_MARKER // node doesn't have target child uploaded
                 && (( // node is occupied at target sectant
                     (target_sectant < 32)
@@ -616,7 +615,7 @@ fn get_by_ray(ray: ptr<function, Line>, start_distance: f32) -> OctreeRayInterse
                 }
             }
             if( // node target points inside and is available
-                target_sectant != OOB_SECTANT
+                target_sectant < BOX_NODE_CHILDREN_COUNT
                 && target_child_descriptor != EMPTY_MARKER
 
                 // node is a leaf
@@ -673,7 +672,7 @@ fn get_by_ray(ray: ptr<function, Line>, start_distance: f32) -> OctreeRayInterse
                     return hit;
                 }
             }
-            if( target_sectant == OOB_SECTANT
+            if( target_sectant >= BOX_NODE_CHILDREN_COUNT
                 || ( // node is uniform
                     0 != (
                         node_metadata[current_node_key / 8]
@@ -772,13 +771,13 @@ fn get_by_ray(ray: ptr<function, Line>, start_distance: f32) -> OctreeRayInterse
                                                             [u32(tmp_vec.y + 1)]
                                                             [u32(tmp_vec.z + 1)];
                     target_bounds.min_position += tmp_vec * target_bounds.size;
-                    if OOB_SECTANT != target_sectant {
+                    if target_sectant < BOX_NODE_CHILDREN_COUNT{
                         target_child_descriptor = node_children[
                             (current_node_key * BOX_NODE_CHILDREN_COUNT) + target_sectant
                         ];
                     }
                     if (
-                        target_sectant == OOB_SECTANT // target is out of bounds
+                        target_sectant >= BOX_NODE_CHILDREN_COUNT // target is out of bounds
                         ||( // current node is occupied at target sectant
                             ((
                                 (target_sectant < 32)
@@ -799,7 +798,7 @@ fn get_by_ray(ray: ptr<function, Line>, start_distance: f32) -> OctreeRayInterse
         // Push ray current distance a little bit forward to avoid iterating the same paths all over again
         ray_current_point += (*ray).direction * 0.1;
         target_sectant = select(
-            OOB_SECTANT,
+            BOX_NODE_CHILDREN_COUNT,
             hash_region(ray_current_point, f32(boxtree_meta_data.boxtree_size)),
             dot(ray_current_point - (*ray).origin, ray_current_point - (*ray).origin) < max_distance
             && ray_current_point.x < f32(boxtree_meta_data.boxtree_size)

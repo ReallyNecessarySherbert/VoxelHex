@@ -163,6 +163,8 @@ pub(crate) fn rebuild<
         brick_ownership,
     );
 
+    println!("Built up population!");
+
     queue_population
 }
 

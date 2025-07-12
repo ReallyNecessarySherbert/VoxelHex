@@ -1,7 +1,7 @@
 use crate::{
     boxtree::{
         types::{BrickData, NodeChildren, NodeContent, PaletteIndexValues},
-        BoxTree, BoxTreeEntry, V3c, VoxelData, BOX_NODE_DIMENSION, OOB_SECTANT,
+        BoxTree, BoxTreeEntry, V3c, VoxelData, BOX_NODE_CHILDREN_COUNT, BOX_NODE_DIMENSION,
     },
     spatial::{
         lut::RAY_TO_NODE_OCCUPANCY_BITMASK_LUT,
@@ -330,20 +330,18 @@ impl<
                     current_bounds.child_bounds_for(target_sectant),
                 )
             } else {
-                (ray.origin, OOB_SECTANT, current_bounds)
+                (ray.origin, BOX_NODE_CHILDREN_COUNT as u8, current_bounds)
             };
         let mut current_node_key: usize;
 
-        while target_sectant != OOB_SECTANT {
+        while (target_sectant as usize) < BOX_NODE_CHILDREN_COUNT {
             current_node_key = Self::ROOT_NODE_KEY as usize;
             current_bounds = Cube::root_bounds(self.boxtree_size as f32);
             node_stack.push(Self::ROOT_NODE_KEY);
-            while !node_stack.is_empty() {
+            while let Some(node_stack_last) = node_stack.last() {
                 let current_node_occupied_bits =
-                    self.stored_occupied_bits(*node_stack.last().unwrap() as usize);
-                debug_assert!(self
-                    .nodes
-                    .key_is_valid(*node_stack.last().unwrap() as usize));
+                    self.stored_occupied_bits(*node_stack_last as usize);
+                debug_assert!(self.nodes.key_is_valid(*node_stack_last as usize));
 
                 let mut do_backtrack_after_leaf_miss = matches!(
                     self.nodes.get(current_node_key),
@@ -351,7 +349,7 @@ impl<
                 );
 
                 // Probe bricks in leaf nodes if target not out of bounds
-                if target_sectant != OOB_SECTANT {
+                if (target_sectant as usize) < BOX_NODE_CHILDREN_COUNT {
                     match self.nodes.get(current_node_key) {
                         NodeContent::UniformLeaf(brick) => {
                             debug_assert!(matches!(
@@ -389,7 +387,7 @@ impl<
                 };
 
                 if do_backtrack_after_leaf_miss
-                    || target_sectant == OOB_SECTANT
+                    || (target_sectant as usize) >= BOX_NODE_CHILDREN_COUNT
                     // The current Node is empty
                     || 0 == current_node_occupied_bits
                     // There is no overlap between node occupancy and the area the ray potentially hits
@@ -450,10 +448,10 @@ impl<
                             &ray_scale_factors,
                         );
                         target_sectant = step_sectant(target_sectant, step_vec);
-                        if OOB_SECTANT != target_sectant {
+                        if (target_sectant as usize) < BOX_NODE_CHILDREN_COUNT {
                             target_bounds.min_position += step_vec * target_bounds.size;
                         }
-                        if target_sectant == OOB_SECTANT // target is out of bounds
+                        if (target_sectant as usize) >= BOX_NODE_CHILDREN_COUNT // target is out of bounds
                             // current node is occupied at target sectant
                             || 0 != (current_node_occupied_bits & (0x01 << target_sectant))
                         {
@@ -479,7 +477,7 @@ impl<
             {
                 offset_sectant(&ray_current_point, self.boxtree_size as f32)
             } else {
-                OOB_SECTANT
+                BOX_NODE_CHILDREN_COUNT as u8
             };
         }
         None

@@ -123,7 +123,6 @@ impl<'a, T: VoxelData> BoxTreeEntry<'a, T> {
 //  ███████████  ░░░███████░   █████ █████    █████    █████   █████ ██████████ ██████████
 // ░░░░░░░░░░░     ░░░░░░░    ░░░░░ ░░░░░    ░░░░░    ░░░░░   ░░░░░ ░░░░░░░░░░ ░░░░░░░░░░
 //####################################################################################
-pub(crate) const OOB_SECTANT: u8 = 64;
 pub(crate) const BOX_NODE_DIMENSION: usize = 4;
 pub(crate) const BOX_NODE_CHILDREN_COUNT: usize = 64;
 
@@ -131,19 +130,19 @@ pub(crate) const BOX_NODE_CHILDREN_COUNT: usize = 64;
 #[macro_export]
 macro_rules! make_tree {
     ($size:expr) => {
-        Boxtree::<u32>::new($size, 32)
+        Boxtree::<u32>::new($size, 32).expect("Boxtree creation error")
     };
 
     ($size:expr, $brick_dim:expr) => {
-        Boxtree::<u32>::new($size, $brick_dim)
+        BoxTree::<u32>::new($size, $brick_dim).expect("Boxtree creation error")
     };
 
     (<$type:ty>, $size:expr) => {
-        Boxtree::<$type>::new($size, 32)
+        BoxTree::<$type>::new($size, 32)
     };
 
     (<$type:ty>, $size:expr, $brick_dim:expr) => {
-        Boxtree::<$type>::new($size, $brick_dim)
+        Boxtree::<$type>::new($size, $brick_dim).expect("Boxtree creation error")
     };
 }
 

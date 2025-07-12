@@ -20,8 +20,8 @@ pub(crate) const fn flat_projection(x: usize, y: usize, z: usize, size: usize) -
     x + (y * size) + (z * size * size)
 }
 
+/// Assigns an index for each sectant, so every child cell can be indexed in a well defined manner
 /// Each Node is separated to 64 sectants based on their relative position inside the Nodes occupying space.
-/// The hash function assigns an index for each sectant, so every child cell can be indexed in a well defined manner
 /// * `offset` - From range 0..size in each dimensions
 /// * `size` - Size of the region to check for child sectants
 pub(crate) fn offset_sectant(offset: &V3c<f32>, size: f32) -> u8 {

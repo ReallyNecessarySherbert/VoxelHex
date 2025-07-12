@@ -1,7 +1,7 @@
 use crate::{
     boxtree::{
         types::{BrickData, NodeContent},
-        BoxTree, V3c, VoxelData, BOX_NODE_CHILDREN_COUNT, OOB_SECTANT,
+        BoxTree, V3c, VoxelData, BOX_NODE_CHILDREN_COUNT,
     },
     object_pool::empty_marker,
     raytracing::bevy::types::{
@@ -659,7 +659,7 @@ impl BoxTreeGPUDataHandler {
             BrickOwnedBy::NodeAsMIP(node_key) => (
                 &tree.node_mips[node_key as usize],
                 node_key as usize,
-                OOB_SECTANT as usize,
+                BOX_NODE_CHILDREN_COUNT,
             ),
         };
 
@@ -732,7 +732,7 @@ impl BoxTreeGPUDataHandler {
                     .unwrap();
                 modified_nodes.push(*parent_meta_index);
 
-                if target_sectant as u8 != OOB_SECTANT {
+                if target_sectant < BOX_NODE_CHILDREN_COUNT {
                     let parent_child_index =
                         (parent_meta_index * BOX_NODE_CHILDREN_COUNT) + target_sectant;
                     self.render_data.node_children[parent_child_index] =
