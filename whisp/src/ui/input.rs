@@ -229,10 +229,10 @@ pub(crate) fn handle_camera_update(
                 cam.target_focus -= dir;
             }
             if keys.pressed(KeyCode::KeyA) {
-                cam.target_focus += right;
+                cam.target_focus -= right;
             }
             if keys.pressed(KeyCode::KeyD) {
-                cam.target_focus -= right;
+                cam.target_focus += right;
             }
         }
     }

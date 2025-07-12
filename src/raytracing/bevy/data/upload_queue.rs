@@ -492,6 +492,9 @@ pub(crate) fn handle_changes<T: VoxelData>(
 
     // Data updates for spyglass viewport
     if view.spyglass.viewport_changed {
+        // Update viewport matrices before uploading to GPU
+        let resolution = view.resolution;
+        view.spyglass.viewport.update_matrices(resolution);
         view.spyglass.viewport_changed = false;
 
         let mut buffer = UniformBuffer::new(Vec::<u8>::new());

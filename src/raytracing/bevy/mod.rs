@@ -246,6 +246,9 @@ fn handle_viewport_position_updates<T: VoxelData>(
             }
 
             view.spyglass.viewport.origin_delta = V3c::unit(0.);
+            // update viewport matrices
+            let resolution = view.resolution;
+            view.spyglass.viewport.update_matrices(resolution);
         }
     }
 }
