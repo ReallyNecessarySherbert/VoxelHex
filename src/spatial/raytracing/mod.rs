@@ -8,8 +8,8 @@ mod tests;
 
 #[derive(Debug)]
 pub struct Ray {
-    pub origin: V3c<f32>,
-    pub direction: V3c<f32>,
+    pub origin: V3cf32,
+    pub direction: V3cf32,
 }
 
 impl Ray {
@@ -17,7 +17,7 @@ impl Ray {
         (1. - self.direction.length()).abs() < 0.000001
     }
 
-    pub fn point_at(&self, d: f32) -> V3c<f32> {
+    pub fn point_at(&self, d: f32) -> V3cf32 {
         self.origin + self.direction * d
     }
 }

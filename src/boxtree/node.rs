@@ -1,11 +1,16 @@
-use crate::boxtree::{
-    empty_marker,
-    types::{
-        Albedo, BrickData, NodeChildren, NodeContent, NodeData, PaletteIndexValues, VoxelData,
+use crate::{
+    boxtree::{
+        empty_marker,
+        types::{
+            Albedo, BrickData, NodeChildren, NodeContent, NodeData, PaletteIndexValues, VoxelData,
+        },
+        BoxTreeEntry, V3c, BOX_NODE_CHILDREN_COUNT,
     },
-    BoxTreeEntry, V3c, BOX_NODE_CHILDREN_COUNT,
+    spatial::{
+        math::{flat_projection, set_occupied_bitmap_value},
+        CubeSides,
+    },
 };
-use crate::spatial::math::{flat_projection, set_occupied_bitmap_value};
 use std::{matches, u64};
 
 //####################################################################################
@@ -158,6 +163,15 @@ impl BrickData<PaletteIndexValues> {
 // ░░░░░░░░░░   ░░░░░   ░░░░░    ░░░░░    ░░░░░   ░░░░░
 //####################################################################################
 impl NodeData {
+    /// Sets occlusion bits of the node
+    /// Occlusion is true if node is not accessible by rays from that side of the node
+    /// Because the node next to it is full.
+    pub(crate) fn set_occlusion(&mut self, side: CubeSides, occluded: bool) {
+        let bit_position = side as u8;
+        self.occlusion_bits &= !(0x01 << bit_position);
+        self.occlusion_bits |= (occluded as u8) << bit_position;
+    }
+
     /// Creates an empty node
     pub(crate) fn empty_node() -> Self {
         NodeData {
@@ -165,6 +179,7 @@ impl NodeData {
             children: NodeChildren::NoChildren,
             mip: BrickData::Empty,
             occupied_bits: 0,
+            occlusion_bits: 0,
         }
     }
 
@@ -175,6 +190,7 @@ impl NodeData {
             children: NodeChildren::NoChildren,
             mip: BrickData::Solid(voxel),
             occupied_bits: u64::MAX,
+            occlusion_bits: 0,
         }
     }
 
@@ -184,6 +200,7 @@ impl NodeData {
             content: NodeContent::UniformLeaf(brick),
             children: NodeChildren::NoChildren,
             mip: BrickData::Empty,
+            occlusion_bits: 0,
             occupied_bits,
         }
     }

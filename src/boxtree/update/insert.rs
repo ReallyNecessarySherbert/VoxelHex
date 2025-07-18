@@ -1,12 +1,12 @@
 use crate::{
     boxtree::{
         iterate::execute_for_relevant_sectants,
-        types::{BoxTreeEntry, BrickData, NodeChildren, NodeContent, NodeData, OctreeError},
+        types::{BoxTreeEntry, BrickData, NodeContent, NodeData, OctreeError},
         BoxTree, VoxelData,
     },
     spatial::{
         math::{flat_projection, matrix_index_for, vector::V3c},
-        Cube,
+        Cube, CubeSides,
     },
 };
 use std::hash::Hash;
@@ -32,16 +32,6 @@ impl<
         #[cfg(all(not(feature = "bytecode"), not(feature = "serialization")))] T: Default + Eq + Clone + Hash + VoxelData,
     > BoxTree<T>
 {
-    //####################################################################################
-    //  █████ ██████   █████  █████████  ██████████ ███████████   ███████████
-    // ░░███ ░░██████ ░░███  ███░░░░░███░░███░░░░░█░░███░░░░░███ ░█░░░███░░░█
-    //  ░███  ░███░███ ░███ ░███    ░░░  ░███  █ ░  ░███    ░███ ░   ░███  ░
-    //  ░███  ░███░░███░███ ░░█████████  ░██████    ░██████████      ░███
-    //  ░███  ░███ ░░██████  ░░░░░░░░███ ░███░░█    ░███░░░░░███     ░███
-    //  ░███  ░███  ░░█████  ███    ░███ ░███ ░   █ ░███    ░███     ░███
-    //  █████ █████  ░░█████░░█████████  ██████████ █████   █████    █████
-    // ░░░░░ ░░░░░    ░░░░░  ░░░░░░░░░  ░░░░░░░░░░ ░░░░░   ░░░░░    ░░░░░
-    //####################################################################################
     /// Inserts the given data into the boxtree into the given voxel position
     /// If there is already available data it overwrites it, except if all components are empty
     /// If all components are empty, this is a no-op, to erase data, please use @clear
@@ -121,14 +111,18 @@ impl<
         }
 
         // A CPU stack does not consume significant relevant resources, e.g. a 4096*4096*4096 chunk has depth of 12
-        let mut node_stack = vec![(Self::ROOT_NODE_KEY, root_bounds)];
+        let mut node_stack = vec![(
+            Self::ROOT_NODE_KEY as usize,
+            root_bounds.sectant_for(&position),
+        )];
+        let mut bounds_stack = vec![root_bounds];
+        let mut updated_bottom_sectants = vec![];
         let mut actual_update_size = V3c::unit(0);
         let mut updated = false;
         let target_content = self.add_to_palette(&data);
         loop {
-            let (current_node_key, current_bounds) = *node_stack.last().unwrap();
-            let current_node_key = current_node_key as usize;
-            let target_child_sectant = current_bounds.sectant_for(&position);
+            let (current_node_key, target_child_sectant) = *node_stack.last().unwrap();
+            let current_bounds = bounds_stack.last().unwrap();
             let target_bounds = current_bounds.child_bounds_for(target_child_sectant);
             let mut target_child_key = self.nodes.get(current_node_key).child(target_child_sectant);
             debug_assert!(
@@ -137,8 +131,7 @@ impl<
                         self.nodes.get(current_node_key).content,
                         NodeContent::UniformLeaf(_)
                     ),
-                "Invalid target bounds(too small): {:?}",
-                target_bounds
+                "Invalid target bounds(too small): {target_bounds:?}"
             );
 
             // Trying to fill up the whole node
@@ -148,7 +141,7 @@ impl<
                 && position <= target_bounds.min_position
             {
                 actual_update_size = execute_for_relevant_sectants(
-                    &current_bounds,
+                    current_bounds,
                     position_u32,
                     insert_size,
                     |position_in_target,
@@ -193,6 +186,8 @@ impl<
                                     .push(NodeData::uniform_solid_node(target_content))
                                     as u32;
                             }
+
+                            updated_bottom_sectants.push(child_sectant);
                         }
                     },
                 );
@@ -210,9 +205,10 @@ impl<
                 // the child at the queried position exists and valid, recurse into it
                 if self.nodes.key_is_valid(target_child_key) {
                     node_stack.push((
-                        self.nodes.get(current_node_key).child(target_child_sectant) as u32,
-                        target_bounds,
+                        self.nodes.get(current_node_key).child(target_child_sectant),
+                        target_bounds.sectant_for(&position),
                     ));
+                    bounds_stack.push(target_bounds);
                 } else {
                     // no children are available for the target sectant while
                     // current node size is still larger, than the requested size
@@ -229,7 +225,7 @@ impl<
                                 BrickData::Solid(voxel) => *voxel == target_content,
                                 BrickData::Parted(brick) => {
                                     let index_in_matrix = matrix_index_for(
-                                        &current_bounds,
+                                        current_bounds,
                                         &(position.into()),
                                         self.brick_dim,
                                     );
@@ -283,11 +279,11 @@ impl<
                             current_node_key,
                             target_child_sectant as usize,
                         );
-
                         node_stack.push((
-                            self.nodes.get(current_node_key).child(target_child_sectant) as u32,
-                            target_bounds,
+                            self.nodes.get(current_node_key).child(target_child_sectant),
+                            target_bounds.sectant_for(&position),
                         ));
+                        bounds_stack.push(target_bounds);
                     } else {
                         // current Node is a non-leaf Node, which doesn't have the child at the requested position,
                         // so it is inserted and the Node becomes non-empty
@@ -305,18 +301,19 @@ impl<
                         }
 
                         // Insert a new child Node
-                        let new_child_node = self.nodes.push(NodeData::empty_node()) as u32;
+                        let new_child_node = self.nodes.push(NodeData::empty_node());
                         *self
                             .nodes
                             .get_mut(current_node_key)
                             .child_mut(target_child_sectant as usize)
-                            .unwrap() = new_child_node;
-                        node_stack.push((new_child_node, target_bounds));
+                            .unwrap() = new_child_node as u32;
+                        node_stack.push((new_child_node, target_bounds.sectant_for(&position)));
+                        bounds_stack.push(target_bounds);
                     }
                 }
             } else {
                 actual_update_size = execute_for_relevant_sectants(
-                    &current_bounds,
+                    current_bounds,
                     position_u32,
                     insert_size,
                     |position_in_target,
@@ -325,14 +322,14 @@ impl<
                      child_target_bounds| {
                         updated |= self.leaf_update(
                             overwrite_if_empty,
-                            (current_node_key, &current_bounds),
+                            (current_node_key, current_bounds),
                             (child_target_bounds, child_sectant as usize),
                             (&position_in_target, &update_size_in_target),
                             target_content,
                         );
+                        updated_bottom_sectants.push(child_sectant);
                     },
                 );
-
                 break;
             }
         }
@@ -344,83 +341,122 @@ impl<
 
         // post-processing operations
         let mut simplifyable = self.auto_simplify; // Don't even start to simplify if it's disabled
-        for (node_key, node_bounds) in node_stack.into_iter().rev() {
-            if !self.nodes.key_is_valid(node_key as usize) {
-                continue;
-            }
 
-            // In case any node is NodeContent::Nothing, it is to be converted to an internal node
-            if let NodeContent::Nothing = self.nodes.get(node_key as usize).content {
-                self.nodes.get_mut(node_key as usize).content = NodeContent::Internal;
-                self.nodes.get_mut(node_key as usize).occupied_bits = 0;
-            }
-
-            // Update Node occupied bits
-            let mut new_occupied_bits = self.nodes.get(node_key as usize).occupied_bits;
-            if node_bounds.size as usize == actual_update_size.x
-                && node_bounds.size as usize == actual_update_size.y
-                && node_bounds.size as usize == actual_update_size.z
-            {
-                new_occupied_bits = u64::MAX;
-            } else {
-                execute_for_relevant_sectants(
-                    &node_bounds,
-                    position_u32,
-                    insert_size,
-                    |_position_in_target,
-                     _update_size_in_target,
-                     child_sectant,
-                     _child_target_bounds| {
-                        if !self.node_empty_at(node_key as usize, child_sectant) {
-                            new_occupied_bits |= 0x01 << child_sectant;
-                        }
-                    },
-                );
-            }
-            debug_assert!(
-                0 != new_occupied_bits,
-                "Occupied bits 0x000000 during insert operation"
+        // firstly, updated nodes on the bottom
+        for updated_bottom_sectant in updated_bottom_sectants {
+            node_stack.last_mut().unwrap().1 = updated_bottom_sectant;
+            let node_key = node_stack.last().unwrap().0;
+            self.post_process_node_insert(
+                &node_stack,
+                bounds_stack.last().unwrap(),
+                &actual_update_size,
+                position_u32,
+                insert_size,
             );
-            self.nodes.get_mut(node_key as usize).occupied_bits = new_occupied_bits;
-            #[cfg(debug_assertions)]
-            {
-                for sectant in 0..BOX_NODE_CHILDREN_COUNT {
-                    // with empty children, the relevant occupied bits should be 0
-                    if self.node_empty_at(node_key as usize, sectant as u8) {
-                        debug_assert_eq!(
-                            0,
-                            self.nodes.get(node_key as usize).occupied_bits & (0x01 << sectant),
-                            "Node[{:?}] under {:?} \n has an empty child in sectant[{:?}], which is incompatible with the occupancy bitmap: {:#10X}",
-                            node_key,
-                            node_bounds,
-                            sectant,
-                            self.nodes.get(node_key as usize).occupied_bits
-                        );
-                    }
-                }
-            }
 
-            // update MIPs
-            self.update_mip(node_key as usize, &node_bounds, &(position.into()));
-
-            // Decide to continue or not
+            // try to simplify leaf nodes only, nodes on the bottom are uniform solid leaves
             if simplifyable
                 && matches!(
-                    self.nodes.get(node_key as usize).content,
+                    self.nodes.get(node_key).content,
                     NodeContent::Leaf(_) | NodeContent::UniformLeaf(_)
                 )
             {
-                // In case of leaf nodes, just try to simplify and continue
-                simplifyable = self.simplify(node_key as usize, false);
+                simplifyable &= self.simplify(node_key, false);
+            }
+        }
+
+        // process higher-level nodes
+        while !node_stack.is_empty() {
+            let node_key = node_stack.last().unwrap().0;
+            if !self.nodes.key_is_valid(node_key) {
                 continue;
             }
+
+            self.post_process_node_insert(
+                &node_stack,
+                bounds_stack.last().unwrap(),
+                &actual_update_size,
+                position_u32,
+                insert_size,
+            );
 
             if simplifyable {
                 // If any Nodes fail to simplify, no need to continue because
                 // their parents can not be simplified anyway because of it
-                simplifyable = self.simplify(node_key as usize, false);
+                simplifyable = self.simplify(node_key, false);
             }
+
+            node_stack.pop();
+            bounds_stack.pop();
         }
         Ok(())
+    }
+
+    /// Handles node post-process for connections, content, mips, occupied bits and occlusion bits
+    /// after data insertion
+    fn post_process_node_insert(
+        &mut self,
+        node_stack: &[(usize, u8)],
+        node_bounds: &Cube,
+        actual_update_size: &V3c<usize>,
+        insert_position: &V3c<u32>,
+        insert_size: u32,
+    ) {
+        debug_assert_ne!(0, node_stack.len());
+        let node_key = node_stack.last().unwrap().0;
+
+        // In case any node is NodeContent::Nothing, it is to be converted to an internal node
+        if let NodeContent::Nothing = self.nodes.get(node_key).content {
+            self.nodes.get_mut(node_key).content = NodeContent::Internal;
+            self.nodes.get_mut(node_key).occupied_bits = 0;
+        }
+
+        // Update Node occupied bits
+        let mut new_occupied_bits = self.nodes.get(node_key).occupied_bits;
+        if node_bounds.size as usize == actual_update_size.x
+            && node_bounds.size as usize == actual_update_size.y
+            && node_bounds.size as usize == actual_update_size.z
+        {
+            new_occupied_bits = u64::MAX;
+        } else {
+            execute_for_relevant_sectants(
+                node_bounds,
+                insert_position,
+                insert_size,
+                |_position_in_target,
+                 _update_size_in_target,
+                 child_sectant,
+                 _child_target_bounds| {
+                    if !self.node_empty_at(node_key, child_sectant) {
+                        new_occupied_bits |= 0x01 << child_sectant;
+                    }
+                },
+            );
+        }
+
+        debug_assert!(
+            0 != new_occupied_bits,
+            "Occupied bits 0x000000 during insert operation"
+        );
+        self.nodes.get_mut(node_key).occupied_bits = new_occupied_bits;
+        #[cfg(debug_assertions)]
+        {
+            for sectant in 0..BOX_NODE_CHILDREN_COUNT {
+                // with empty children, the relevant occupied bits should be 0
+                if self.node_empty_at(node_key, sectant as u8) {
+                    debug_assert_eq!(
+                            0,
+                            self.nodes.get(node_key).occupied_bits & (0x01 << sectant),
+                            "Node[{:?}] under {:?} \n has an empty child in sectant[{:?}], which is incompatible with the occupancy bitmap: {:#10X}",
+                            node_key,
+                            node_bounds,
+                            sectant,
+                            self.nodes.get(node_key).occupied_bits
+                        );
+                }
+            }
+        }
+
+        self.update_mip(node_key, node_bounds, insert_position);
     }
 }

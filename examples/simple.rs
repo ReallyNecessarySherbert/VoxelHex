@@ -113,7 +113,7 @@ fn main() {
 
     // ..or cleared in bulk!
     // Both insert and clear bulk operations update the data until the end of
-    // the target leaf node which contains the update range.
+    // the target node which contains the update range.
     // In the below example, most voxels from 5,5,5 until 8,8,8 will be cleared
     // instead of 5,5,5 -/-> 69,69,69
     tree.clear_at_lod(&V3c::new(5, 5, 5), 64).ok().unwrap();

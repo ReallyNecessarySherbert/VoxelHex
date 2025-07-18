@@ -231,13 +231,6 @@ mod iterate_tests {
                 &(sibling_position.into()),
             )
             .expect("Expected sibling node to exist");
-
-        let _ = tree.get_access_stack_for(sibling_node, sibling_position.into());
-        println!(
-            "start vs sibling: {start_node}, {:?} <> {sibling_node}, {:?}",
-            start_position, sibling_position
-        );
-
         assert_ne!(
             start_node, sibling_node,
             "Start and sibling nodes should differ"
@@ -364,12 +357,11 @@ mod iterate_tests {
     }
 
     #[test]
-    #[ignore = "FIXME: Undefined behavior, fix in #34"]
     fn test_sibling_jump_from_higher_level_leaf() {
         const BRICK_DIM: u32 = 4;
         let mut tree: BoxTree = make_tree!(1024, BRICK_DIM);
-        let start_position = V3c::new(256, 0, 0);
-        let sibling_position = V3c::new(512, 0, 0);
+        let start_position = V3c::new(256, 256, 0);
+        let sibling_position = V3c::new(512, 331, 0);
         let step_direction = V3c::new(1., 0., 0.);
 
         tree.insert_at_lod(
@@ -395,14 +387,55 @@ mod iterate_tests {
         let node_stack_for_start_node =
             tree.get_access_stack_for(start_node, start_position.into());
 
-        assert!(tree
-            .get_sibling_by_position(start_node, step_direction, &(start_position.into()),)
-            .is_none());
+        let sibling_node = tree
+            .get_node_internal(
+                BoxTree::<u32>::ROOT_NODE_KEY as usize,
+                &mut Cube::root_bounds(1024.),
+                &(sibling_position.into()),
+            )
+            .expect("Expected sibling node to exist");
+        let mut node_stack_for_sibling_node =
+            tree.get_access_stack_for(sibling_node, sibling_position.into());
+
+        // sibling node need to be on the same level as the start node
+        assert!(
+            node_stack_for_start_node.len() < node_stack_for_sibling_node.len(),
+            "Expected lower level node to have a larger access stack",
+        );
+        node_stack_for_sibling_node.resize(node_stack_for_start_node.len() - 1, (0, 0));
+        let (sibling_node, sibling_sectant) = node_stack_for_sibling_node.last().unwrap();
+
+        assert_ne!(
+            start_node, *sibling_node,
+            "Start and sibling nodes should differ"
+        );
+
+        // get target sectant of starting node
+        let (queried_sibling_node, queried_sibling_sectant) = tree
+            .get_sibling_by_position(start_node, step_direction, &(start_position.into()))
+            .expect(
+                &format!(
+                    "Expected to be able to query sibling node in the direction {:?}",
+                    step_direction
+                )
+                .to_string(),
+            );
+        assert_eq!(queried_sibling_node, *sibling_node);
+        assert_eq!(queried_sibling_sectant, *sibling_sectant);
 
         // Check result with the other interface too
-        assert!(tree
+        let (queried_sibling_node, queried_sibling_sectant) = tree
             .get_sibling_by_stack(step_direction, &node_stack_for_start_node)
-            .is_none());
+            .expect(
+                &format!(
+                    "Expected to be able to query sibling node in the direction {:?}",
+                    step_direction
+                )
+                .to_string(),
+            );
+
+        assert_eq!(queried_sibling_node, *sibling_node);
+        assert_eq!(queried_sibling_sectant, *sibling_sectant);
     }
 
     #[test]

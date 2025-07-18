@@ -18,9 +18,7 @@ pub use types::{
 };
 
 use crate::{
-    boxtree::types::{
-        BrickData, NodeChildren, NodeContent, NodeData, OctreeError, PaletteIndexValues,
-    },
+    boxtree::types::{BrickData, NodeContent, NodeData, OctreeError, PaletteIndexValues},
     object_pool::{empty_marker, ObjectPool},
     spatial::{
         math::{flat_projection, matrix_index_for},

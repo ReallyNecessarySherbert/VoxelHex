@@ -184,7 +184,6 @@ impl<
     }
 
     /// Provides the sibling of the given node in the given direction, if it exists and not ambigous
-    /// Behavior undefined when the sibling of a larger level leaf node is queried, see #34
     /// It might return with a leaf node on a higher level, than the given node
     pub(crate) fn get_sibling_by_position(
         &self,
@@ -198,20 +197,37 @@ impl<
 
     /// Provides the sibling of the given node in the given direction, if it exists and not ambigous
     /// It might return with a leaf node on a higher level, than the given node
-    /// Behavior undefined when the sibling of a larger level leaf node is queried, see #34
     /// It uses the given node_stack, which is re-usable for nodes
     pub(crate) fn get_sibling_by_stack(
         &self,
         direction: V3c<f32>,
-        node_stack: &Vec<(usize, u8)>,
+        node_stack: &[(usize, u8)],
     ) -> Option<(usize, u8)> {
         let mut current_sectant = node_stack
             .last()
             .expect("Expected given node_stack to contain entries!")
             .1;
         let mut next_sectant = step_sectant(current_sectant, direction);
-        let mut node_stack = node_stack.clone();
+        let mut node_stack = node_stack.to_vec();
         let mut mirror_stack = VecDeque::<u8>::new();
+        let mut is_bottom_uniform_leaf = false;
+
+        // On the bottom of the access stack there may be a uniform leaf
+        // If current node is a uniform leaf, step to sibling node at the same level
+        // This is needed because uniform leaf nodes have no children,
+        // and sectants are not differentiated within.
+        if !node_stack.is_empty()
+            && matches!(
+                self.nodes.get(node_stack.last().unwrap().0).content,
+                NodeContent::UniformLeaf(_)
+            )
+        {
+            node_stack.pop();
+            if let Some((_parent_key, parent_sectant)) = node_stack.last_mut() {
+                next_sectant = step_sectant(*parent_sectant, direction);
+            }
+            is_bottom_uniform_leaf = true;
+        }
 
         // Collect sibling sectants on each level
         while !node_stack.is_empty() && (next_sectant as usize) >= BOX_NODE_CHILDREN_COUNT {
@@ -244,6 +260,12 @@ impl<
         // the end of the node_stack
         mirror_stack.push_front(next_sectant);
 
+        // In case Uniform nodes, the node at the same level is provided
+        // in case there is a valid sibling node
+        if is_bottom_uniform_leaf {
+            return Some((node_stack.last().unwrap().0, next_sectant));
+        }
+
         // starting from the last node in the original stack
         // traverse down the mirror stack to the desired node level
         let mut node_key = node_stack.last().unwrap().0;
@@ -268,7 +290,7 @@ impl<
             }
         }
 
-        return Some((node_key, next_sectant));
+        Some((node_key, next_sectant))
     }
 
     /// Provides the key of the child node at the given position on the lowest level inside the given parent node
