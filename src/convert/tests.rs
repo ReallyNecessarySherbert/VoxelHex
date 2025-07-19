@@ -1,5 +1,5 @@
 use crate::boxtree::{
-    types::{Albedo, BrickData, NodeChildren, NodeContent, PaletteIndexValues},
+    types::{Albedo, BrickData, NodeChildren, NodeContent, NodeData, PaletteIndexValues},
     BoxTree, BoxTreeEntry, MIPResamplingMethods, V3c, BOX_NODE_CHILDREN_COUNT,
 };
 use bendy::{decoding::FromBencode, encoding::ToBencode};
@@ -31,7 +31,7 @@ fn test_node_brickdata_serialization() {
 #[test]
 fn test_nodecontent_serialization() {
     let node_content_nothing = NodeContent::<PaletteIndexValues>::Nothing;
-    let node_content_internal = NodeContent::<PaletteIndexValues>::Internal(0xAB);
+    let node_content_internal = NodeContent::<PaletteIndexValues>::Internal;
     let node_content_leaf = NodeContent::<PaletteIndexValues>::Leaf(
         (0..BOX_NODE_CHILDREN_COUNT)
             .map(|sectant| match sectant % 3 {
@@ -83,19 +83,27 @@ fn test_nodecontent_serialization() {
         "Expected {:?} == {:?}",
         node_content_uniform_leaf_deserialized, node_content_uniform_leaf
     );
+    assert_eq!(node_content_internal_deserialized, node_content_internal);
+}
 
-    // Node content internal has a special equality implementation, where there is no equality between internal nodes
-    match (node_content_internal_deserialized, node_content_internal) {
-        (NodeContent::Internal(bits1), NodeContent::Internal(bits2)) => {
-            assert_eq!(bits1, bits2);
-        }
-        _ => {
-            assert!(
-                false,
-                "Deserialized and Original NodeContent enums should match!"
-            )
-        }
-    }
+#[test]
+fn test_node_data_serialization() {
+    let node_data = NodeData {
+        content: NodeContent::UniformLeaf(BrickData::Solid(5)),
+        children: NodeChildren::Children([420; 64]),
+        mip: BrickData::Solid(69),
+        occupied_bits: 666,
+    };
+    let node_data_deserialized = NodeData::from_bencode(&node_data.to_bencode().ok().unwrap())
+        .ok()
+        .unwrap();
+    assert_eq!(node_data.content, node_data_deserialized.content);
+    assert_eq!(node_data.children, node_data_deserialized.children);
+    assert_eq!(node_data.mip, node_data_deserialized.mip);
+    assert_eq!(
+        node_data.occupied_bits,
+        node_data_deserialized.occupied_bits
+    );
 }
 
 #[test]
@@ -159,11 +167,9 @@ fn test_node_children_serialization() {
         7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4,
         5, 6, 7, 8,
     ]);
-    let node_children_bitmap = NodeChildren::OccupancyBitmap(666);
 
     let serialized_node_children_empty = node_children_empty.to_bencode();
     let serialized_node_children_filled = node_children_filled.to_bencode();
-    let serialized_node_children_bitmap = node_children_bitmap.to_bencode();
 
     let deserialized_node_children_empty =
         NodeChildren::from_bencode(&serialized_node_children_empty.ok().unwrap())
@@ -173,14 +179,8 @@ fn test_node_children_serialization() {
         NodeChildren::from_bencode(&serialized_node_children_filled.ok().unwrap())
             .ok()
             .unwrap();
-    let deserialized_node_children_bitmap =
-        NodeChildren::from_bencode(&serialized_node_children_bitmap.ok().unwrap())
-            .ok()
-            .unwrap();
-
     assert!(deserialized_node_children_empty == node_children_empty);
     assert!(deserialized_node_children_filled == node_children_filled);
-    assert!(deserialized_node_children_bitmap == node_children_bitmap);
 }
 
 #[test]

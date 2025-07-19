@@ -1,7 +1,8 @@
 use crate::{
     boxtree::{
-        types::NodeContent, Albedo, BoxTree, MIPResamplingMethods, VoxelData,
-        BOX_NODE_CHILDREN_COUNT, BOX_NODE_DIMENSION,
+        types::{BrickData, NodeContent},
+        Albedo, BoxTree, MIPResamplingMethods, VoxelData, BOX_NODE_CHILDREN_COUNT,
+        BOX_NODE_DIMENSION,
     },
     spatial::{
         math::vector::{V3c, V3cf32},
@@ -308,6 +309,7 @@ impl<
         loop {
             match self.nodes.get(current_node_key).content {
                 NodeContent::Nothing | NodeContent::Leaf(_) | NodeContent::UniformLeaf(_) => {
+                    // Check if uniform leaf has matching occupied bits
                     return Some(current_node_key);
                 }
                 NodeContent::Internal => {

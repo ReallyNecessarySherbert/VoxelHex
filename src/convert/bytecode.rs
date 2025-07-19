@@ -1,6 +1,9 @@
 use crate::{
     boxtree::{
-        types::{BrickData, MIPMapStrategy, MIPResamplingMethods, NodeChildren, NodeContent},
+        types::{
+            BrickData, MIPMapStrategy, MIPResamplingMethods, NodeChildren, NodeContent, NodeData,
+            PaletteIndexValues,
+        },
         Albedo, BoxTree, BOX_NODE_CHILDREN_COUNT,
     },
     object_pool::ObjectPool,
@@ -243,16 +246,58 @@ where
 //  ░███  ░░█████ ░░███     ███  ░███    ███  ░███ ░   █
 //  █████  ░░█████ ░░░███████░   ██████████   ██████████
 // ░░░░░    ░░░░░    ░░░░░░░    ░░░░░░░░░░   ░░░░░░░░░░
-
-//    █████████     ███████    ██████   █████ ███████████ ██████████ ██████   █████ ███████████
-//   ███░░░░░███  ███░░░░░███ ░░██████ ░░███ ░█░░░███░░░█░░███░░░░░█░░██████ ░░███ ░█░░░███░░░█
-//  ███     ░░░  ███     ░░███ ░███░███ ░███ ░   ░███  ░  ░███  █ ░  ░███░███ ░███ ░   ░███  ░
-// ░███         ░███      ░███ ░███░░███░███     ░███     ░██████    ░███░░███░███     ░███
-// ░███         ░███      ░███ ░███ ░░██████     ░███     ░███░░█    ░███ ░░██████     ░███
-// ░░███     ███░░███     ███  ░███  ░░█████     ░███     ░███ ░   █ ░███  ░░█████     ░███
-//  ░░█████████  ░░░███████░   █████  ░░█████    █████    ██████████ █████  ░░█████    █████
-//   ░░░░░░░░░     ░░░░░░░    ░░░░░    ░░░░░    ░░░░░    ░░░░░░░░░░ ░░░░░    ░░░░░    ░░░░░
+//  ██████████     █████████   ███████████   █████████
+// ░░███░░░░███   ███░░░░░███ ░█░░░███░░░█  ███░░░░░███
+//  ░███   ░░███ ░███    ░███ ░   ░███  ░  ░███    ░███
+//  ░███    ░███ ░███████████     ░███     ░███████████
+//  ░███    ░███ ░███░░░░░███     ░███     ░███░░░░░███
+//  ░███    ███  ░███    ░███     ░███     ░███    ░███
+//  ██████████   █████   █████    █████    █████   █████
 //####################################################################################
+impl ToBencode for NodeData {
+    const MAX_DEPTH: usize = SERIALIZE_MAX_DEPTH;
+    fn encode(&self, encoder: SingleItemEncoder) -> Result<(), BencodeError> {
+        encoder.emit_list(|e| {
+            e.emit(&self.content)?;
+            e.emit(self.children)?;
+            e.emit(&self.mip)?;
+            e.emit(self.occupied_bits)
+        })
+    }
+}
+
+impl FromBencode for NodeData {
+    fn decode_bencode_object(data: Object) -> Result<Self, bendy::decoding::Error> {
+        match data {
+            Object::List(mut list) => {
+                let content = NodeContent::<u32>::decode_bencode_object(
+                    list.next_object()?
+                        .expect("Expected Node children from byte stream!"),
+                )?;
+                let children = NodeChildren::decode_bencode_object(
+                    list.next_object()?
+                        .expect("Expected Node contents from byte stream!"),
+                )?;
+                let mip = BrickData::<PaletteIndexValues>::decode_bencode_object(
+                    list.next_object()?
+                        .expect("Expected Node mip from byte stream!"),
+                )?;
+                let occupied_bits = u64::decode_bencode_object(
+                    list.next_object()?
+                        .expect("Expected Node occupied bits from byte stream!"),
+                )?;
+                Ok(Self {
+                    content,
+                    children,
+                    mip,
+                    occupied_bits,
+                })
+            }
+            _ => Err(bendy::decoding::Error::unexpected_token("List", "not List")),
+        }
+    }
+}
+
 impl<T> ToBencode for NodeContent<T>
 where
     T: ToBencode + Debug + Default + Clone + PartialEq,
@@ -261,10 +306,7 @@ where
     fn encode(&self, encoder: SingleItemEncoder) -> Result<(), BencodeError> {
         match self {
             NodeContent::Nothing => encoder.emit_str("#"),
-            NodeContent::Internal => encoder.emit_list(|e| {
-                e.emit_str("##")?;
-                e.emit_int(*occupied_bits)
-            }),
+            NodeContent::Internal => encoder.emit_str("##"),
             NodeContent::Leaf(bricks) => encoder.emit_list(|e| {
                 e.emit_str("###")?;
                 for brick in bricks.iter().take(BOX_NODE_CHILDREN_COUNT) {
@@ -317,19 +359,10 @@ where
                     )),
                 }?;
 
-                if !is_leaf && !is_uniform {
-                    let occupied_bits;
-                    match list.next_object()?.unwrap() {
-                        Object::Integer(i) => occupied_bits = i.parse()?,
-                        _ => {
-                            return Err(bendy::decoding::Error::unexpected_token(
-                                "int field for Internal Node Occupancy bitmap",
-                                "Something else",
-                            ))
-                        }
-                    };
-                    return Ok(NodeContent::Internal(occupied_bits));
-                }
+                debug_assert!(
+                    is_leaf || is_uniform,
+                    "Expected NodeContent list to be either leaf, uniform or both!"
+                );
 
                 if is_leaf && !is_uniform {
                     let leaf_data: [BrickData<T>; BOX_NODE_CHILDREN_COUNT] = (0
@@ -359,8 +392,18 @@ where
                 );
             }
             Object::Bytes(b) => {
-                assert!(String::from_utf8(b.to_vec()).unwrap_or("".to_string()) == "#");
-                Ok(NodeContent::Nothing)
+                // NodeContent is either Internal or Nothing
+                match String::from_utf8(b.to_vec())
+                    .unwrap_or("".to_string())
+                    .as_str()
+                {
+                    "#" => Ok(NodeContent::Nothing),
+                    "##" => Ok(NodeContent::Internal),
+                    something_else => Err(bendy::decoding::Error::unexpected_token(
+                        "Nodecontent node type to be Internal or Nothing,",
+                        something_else,
+                    )),
+                }
             }
             _ => Err(bendy::decoding::Error::unexpected_token(
                 "A NodeContent Object, either a List or a ByteString",
@@ -403,10 +446,6 @@ impl ToBencode for NodeChildren<u32> {
                 Ok(())
             }),
             NodeChildren::NoChildren => encoder.emit_str("##x##"),
-            NodeChildren::OccupancyBitmap(map) => encoder.emit_list(|e| {
-                e.emit_str("##b##")?;
-                e.emit(map)
-            }),
         }
     }
 }
@@ -428,9 +467,7 @@ impl FromBencode for NodeChildren<u32> {
                         }
                         Ok(NodeChildren::Children(c.try_into().ok().unwrap()))
                     }
-                    "##b##" => Ok(NodeChildren::OccupancyBitmap(u64::decode_bencode_object(
-                        list.next_object()?.unwrap(),
-                    )?)),
+                    "##x##" => todo!(),
                     s => Err(bendy::decoding::Error::unexpected_token(
                         "A NodeChildren marker, either ##b## or ##c##",
                         s,
@@ -645,14 +682,13 @@ where
 {
     const MAX_DEPTH: usize = SERIALIZE_MAX_DEPTH;
     fn encode(&self, encoder: SingleItemEncoder) -> Result<(), BencodeError> {
+        //TODO: encode/decode node data
         encoder.emit_list(|e| {
             e.emit(crate::version())?;
             e.emit_int(self.auto_simplify as u8)?;
             e.emit_int(self.boxtree_size)?;
             e.emit_int(self.brick_dim)?;
             e.emit(&self.nodes)?;
-            e.emit(&self.node_children)?;
-            e.emit(&self.node_mips)?;
             e.emit(&self.voxel_color_palette)?;
             e.emit(&self.voxel_data_palette)?;
             e.emit(&self.mip_map_strategy)?;
@@ -699,8 +735,6 @@ where
                 }?;
 
                 let nodes = ObjectPool::decode_bencode_object(list.next_object()?.unwrap())?;
-                let node_children = Vec::decode_bencode_object(list.next_object()?.unwrap())?;
-                let node_mips = Vec::decode_bencode_object(list.next_object()?.unwrap())?;
 
                 let voxel_color_palette =
                     Vec::<Albedo>::decode_bencode_object(list.next_object()?.unwrap())?;
@@ -724,8 +758,6 @@ where
                     boxtree_size,
                     brick_dim,
                     nodes,
-                    node_children,
-                    node_mips,
                     voxel_color_palette,
                     voxel_data_palette,
                     map_to_color_index_in_palette,

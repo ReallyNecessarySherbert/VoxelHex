@@ -154,6 +154,7 @@ impl<
     > BoxTree<T>
 {
     /// Provides the child key if there is a valid child under the given sectant
+    #[cfg(feature = "bevy_wgpu")]
     pub(crate) fn valid_child_for(&self, node_key: usize, sectant: u8) -> Option<usize> {
         let child_key = self.nodes.get(node_key).child(sectant);
         if self.nodes.key_is_valid(child_key) {
