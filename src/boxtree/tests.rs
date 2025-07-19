@@ -361,7 +361,7 @@ mod iterate_tests {
         const BRICK_DIM: u32 = 4;
         let mut tree: BoxTree = make_tree!(1024, BRICK_DIM);
         let start_position = V3c::new(256, 256, 0);
-        let sibling_position = V3c::new(512, 331, 0);
+        let sibling_position = V3c::new(512, 256, 0);
         let step_direction = V3c::new(1., 0., 0.);
 
         tree.insert_at_lod(
@@ -402,7 +402,7 @@ mod iterate_tests {
             node_stack_for_start_node.len() < node_stack_for_sibling_node.len(),
             "Expected lower level node to have a larger access stack",
         );
-        node_stack_for_sibling_node.resize(node_stack_for_start_node.len() - 1, (0, 0));
+        node_stack_for_sibling_node.resize(node_stack_for_start_node.len(), (0, 0));
         let (sibling_node, sibling_sectant) = node_stack_for_sibling_node.last().unwrap();
 
         assert_ne!(

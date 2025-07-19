@@ -261,7 +261,8 @@ impl ToBencode for NodeData {
             e.emit(&self.content)?;
             e.emit(self.children)?;
             e.emit(&self.mip)?;
-            e.emit(self.occupied_bits)
+            e.emit(self.occupied_bits)?;
+            e.emit(self.occlusion_bits)
         })
     }
 }
@@ -286,11 +287,16 @@ impl FromBencode for NodeData {
                     list.next_object()?
                         .expect("Expected Node occupied bits from byte stream!"),
                 )?;
+                let occlusion_bits = u8::decode_bencode_object(
+                    list.next_object()?
+                        .expect("Expected Node occlusion bits from byte stream!"),
+                )?;
                 Ok(Self {
                     content,
                     children,
                     mip,
                     occupied_bits,
+                    occlusion_bits,
                 })
             }
             _ => Err(bendy::decoding::Error::unexpected_token("List", "not List")),

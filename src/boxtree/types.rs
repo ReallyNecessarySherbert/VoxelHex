@@ -173,6 +173,21 @@ pub(crate) struct NodeData {
 
     /// Occupancy information of children on the bit-level
     pub(crate) occupied_bits: u64,
+
+    /// Occlusion information for node sides
+    ///  _===============================================================_
+    /// | Byte 0   | node occlusion bits for sides:                      |
+    /// |----------------------------------------------------------------|
+    /// |  bit 0   | set if back side of the node is occluded            |
+    /// |  bit 1   | set if front side of the node is occluded           |
+    /// |  bit 2   | set if top of the node is occluded                  |
+    /// |  bit 3   | set if bottom side of the node is occluded          |
+    /// |  bit 4   | set if left side of the node is occluded            |
+    /// |  bit 5   | set if right side of the node is occluded           |
+    /// |  bit 6   | unused                                              |
+    /// |  bit 7   | unused                                              |
+    /// `================================================================`
+    pub(crate) occlusion_bits: u8,
 }
 
 /// Sparse 64Tree of Voxel Bricks, where each leaf node contains a brick of voxels.

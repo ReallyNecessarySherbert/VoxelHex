@@ -116,7 +116,7 @@ impl<
             root_bounds.sectant_for(&position),
         )];
         let mut bounds_stack = vec![root_bounds];
-        let mut updated_bottom_sectants = vec![];
+        let mut modified_bottom_sectants = vec![];
         let mut actual_update_size = V3c::unit(0);
         let mut updated = false;
         let target_content = self.add_to_palette(&data);
@@ -186,12 +186,10 @@ impl<
                                     .push(NodeData::uniform_solid_node(target_content))
                                     as u32;
                             }
-
-                            updated_bottom_sectants.push(child_sectant);
+                            modified_bottom_sectants.push(child_sectant);
                         }
                     },
                 );
-
                 break;
             }
 
@@ -327,7 +325,7 @@ impl<
                             (&position_in_target, &update_size_in_target),
                             target_content,
                         );
-                        updated_bottom_sectants.push(child_sectant);
+                        modified_bottom_sectants.push(child_sectant);
                     },
                 );
                 break;
@@ -343,25 +341,48 @@ impl<
         let mut simplifyable = self.auto_simplify; // Don't even start to simplify if it's disabled
 
         // firstly, updated nodes on the bottom
-        for updated_bottom_sectant in updated_bottom_sectants {
-            node_stack.last_mut().unwrap().1 = updated_bottom_sectant;
-            let node_key = node_stack.last().unwrap().0;
-            self.post_process_node_insert(
-                &node_stack,
-                bounds_stack.last().unwrap(),
-                &actual_update_size,
-                position_u32,
-                insert_size,
-            );
+        for modified_bottom_sectant in modified_bottom_sectants {
+            let (node_key, original_sectant) = node_stack.last().cloned().unwrap();
+            let node_bounds = bounds_stack.last().unwrap();
+            let child_key = self.nodes.get(node_key).child(modified_bottom_sectant);
 
-            // try to simplify leaf nodes only, nodes on the bottom are uniform solid leaves
-            if simplifyable
-                && matches!(
-                    self.nodes.get(node_key).content,
-                    NodeContent::Leaf(_) | NodeContent::UniformLeaf(_)
-                )
-            {
-                simplifyable &= self.simplify(node_key, false);
+            if self.nodes.key_is_valid(child_key) {
+                // Check bottom update as a node
+                let child_bounds = node_bounds.child_bounds_for(modified_bottom_sectant);
+
+                // Add child node into the stack
+                node_stack.push((
+                    child_key,
+                    child_bounds.sectant_for(&V3c::new(
+                        position.x.max(child_bounds.min_position.x),
+                        position.y.max(child_bounds.min_position.y),
+                        position.z.max(child_bounds.min_position.z),
+                    )),
+                ));
+                self.post_process_node_insert(
+                    &node_stack,
+                    &child_bounds,
+                    &actual_update_size,
+                    position_u32,
+                    insert_size,
+                );
+                node_stack.pop();
+            } else {
+                node_stack.last_mut().unwrap().1 = modified_bottom_sectant;
+
+                // Check bottom update as leaf
+                self.post_process_node_insert(
+                    &node_stack,
+                    node_bounds,
+                    &actual_update_size,
+                    position_u32,
+                    insert_size,
+                );
+                node_stack.last_mut().unwrap().1 = original_sectant;
+            }
+
+            if simplifyable {
+                simplifyable &= self.simplify(child_key, false);
             }
         }
 
@@ -432,6 +453,26 @@ impl<
                     }
                 },
             );
+        }
+
+        // Update sibling nodes occlusion bits
+        if new_occupied_bits == u64::MAX {
+            for (direction, side) in [
+                (V3c::new(-1., 0., 0.), CubeSides::Right),
+                (V3c::new(1., 0., 0.), CubeSides::Left),
+                (V3c::new(0., -1., 0.), CubeSides::Top),
+                (V3c::new(0., 1., 0.), CubeSides::Bottom),
+                (V3c::new(0., 0., -1.), CubeSides::Front),
+                (V3c::new(0., 0., 1.), CubeSides::Back),
+            ]
+            .iter()
+            {
+                if let Some((sibling_node, _sibling_sectant)) =
+                    self.get_sibling_by_stack(*direction, node_stack)
+                {
+                    self.nodes.get_mut(sibling_node).set_occlusion(*side, true);
+                }
+            }
         }
 
         debug_assert!(

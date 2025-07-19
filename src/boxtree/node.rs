@@ -172,6 +172,11 @@ impl NodeData {
         self.occlusion_bits |= (occluded as u8) << bit_position;
     }
 
+    /// Provides occlusion information ofthe side of the given node
+    pub(crate) fn is_occluded(&self) -> bool {
+        0x3F == (self.occlusion_bits & 0x3F)
+    }
+
     /// Creates an empty node
     pub(crate) fn empty_node() -> Self {
         NodeData {

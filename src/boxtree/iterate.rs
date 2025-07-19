@@ -211,8 +211,7 @@ impl<
         let mut next_sectant = step_sectant(current_sectant, direction);
         let mut node_stack = node_stack.to_vec();
         let mut mirror_stack = VecDeque::<u8>::new();
-        let mut is_bottom_uniform_leaf = false;
-
+        let mut uniform_leaf_sibling_sectant = None;
         // On the bottom of the access stack there may be a uniform leaf
         // If current node is a uniform leaf, step to sibling node at the same level
         // This is needed because uniform leaf nodes have no children,
@@ -223,11 +222,16 @@ impl<
                 NodeContent::UniformLeaf(_)
             )
         {
-            node_stack.pop();
+            let (_node_key, mut target_sectant) = node_stack.pop().unwrap();
+
+            while (target_sectant as usize) < BOX_NODE_CHILDREN_COUNT {
+                target_sectant = step_sectant(target_sectant, direction);
+            }
+            uniform_leaf_sibling_sectant = Some(target_sectant - BOX_NODE_CHILDREN_COUNT as u8);
+
             if let Some((_parent_key, parent_sectant)) = node_stack.last_mut() {
                 next_sectant = step_sectant(*parent_sectant, direction);
             }
-            is_bottom_uniform_leaf = true;
         }
 
         // Collect sibling sectants on each level
@@ -263,8 +267,15 @@ impl<
 
         // In case Uniform nodes, the node at the same level is provided
         // in case there is a valid sibling node
-        if is_bottom_uniform_leaf {
-            return Some((node_stack.last().unwrap().0, next_sectant));
+        if let Some(sibling_sectant) = uniform_leaf_sibling_sectant {
+            let sibling_node = self
+                .nodes
+                .get(node_stack.last().unwrap().0)
+                .child(next_sectant);
+            if self.nodes.key_is_valid(sibling_node) {
+                return Some((sibling_node, sibling_sectant));
+            }
+            return None;
         }
 
         // starting from the last node in the original stack

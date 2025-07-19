@@ -64,6 +64,7 @@ impl<
         )];
         let mut bounds_stack = vec![root_bounds];
         let mut erased_whole_sectants = vec![];
+        let mut modified_bottom_sectants = vec![];
         let mut actual_update_size = V3c::unit(0);
         let mut updated = false;
 
@@ -90,7 +91,6 @@ impl<
                     NodeContent::Internal
                 )
             {
-                // Parent occupied bits are correctly set in post-processing, not here
                 actual_update_size = execute_for_relevant_sectants(
                     current_bounds,
                     position_u32,
@@ -253,6 +253,7 @@ impl<
                             (&position_in_target, &update_size_in_target),
                             empty_marker::<PaletteIndexValues>(),
                         );
+                        modified_bottom_sectants.push(child_sectant);
                     },
                 );
                 break;
@@ -266,6 +267,54 @@ impl<
 
         // post-processing operations
         let mut simplifyable = self.auto_simplify; // Don't even start to simplify if it's disabled
+        for modified_bottom_sectant in modified_bottom_sectants {
+            let (node_key, original_sectant) = node_stack.last().cloned().unwrap();
+            let node_bounds = bounds_stack.last().unwrap();
+            let child_key = self.nodes.get(node_key).child(modified_bottom_sectant);
+
+            if self.nodes.key_is_valid(child_key) {
+                // Check bottom update as a node
+                let child_bounds = node_bounds.child_bounds_for(modified_bottom_sectant);
+
+                // Add child node into the stack
+                node_stack.push((
+                    child_key,
+                    child_bounds.sectant_for(&V3c::new(
+                        position.x.max(child_bounds.min_position.x),
+                        position.y.max(child_bounds.min_position.y),
+                        position.z.max(child_bounds.min_position.z),
+                    )),
+                ));
+                self.post_process_node_clear(
+                    &node_stack,
+                    &child_bounds,
+                    &actual_update_size,
+                    position_u32,
+                    clear_size,
+                    vec![],
+                );
+                node_stack.pop();
+            } else {
+                node_stack.last_mut().unwrap().1 = modified_bottom_sectant;
+
+                // Check bottom update as leaf
+                self.post_process_node_clear(
+                    &node_stack,
+                    node_bounds,
+                    &actual_update_size,
+                    position_u32,
+                    clear_size,
+                    vec![],
+                );
+                node_stack.last_mut().unwrap().1 = original_sectant;
+            }
+
+            if simplifyable {
+                simplifyable &= self.simplify(child_key, false);
+            }
+        }
+
+        // processing higher level nodes
         while !node_stack.is_empty() {
             erased_whole_sectants = if self.post_process_node_clear(
                 &node_stack,
@@ -314,12 +363,52 @@ impl<
 
         // Any child cleared during this operation needs to be freed up
         // and parent connection needs to be updated as well
-        for child_sectant in removed_children {
-            let child_key = self.nodes.get(node_key).child(child_sectant);
-            self.nodes.free(child_key);
-            self.nodes
-                .get_mut(node_key)
-                .clear_child(child_sectant as usize);
+        if 0 < removed_children.len() {
+            let mut node_stack = node_stack.to_vec();
+            for child_sectant in removed_children {
+                let child_key = self.nodes.get(node_key).child(child_sectant);
+
+                // Set occlusion bits for deleted children
+                //TODO: Except for leaf nodes..
+                //TODO: for here and insert!!
+                if self.nodes.key_is_valid(child_key) {
+                    if self.nodes.get_mut(child_key).occupied_bits == u64::MAX {
+                        let child_bounds = node_bounds.child_bounds_for(child_sectant);
+                        node_stack.push((
+                            child_key,
+                            child_bounds.sectant_for(
+                                &(&V3c::new(
+                                    (clear_position.x as f32).max(child_bounds.min_position.x),
+                                    (clear_position.y as f32).max(child_bounds.min_position.y),
+                                    (clear_position.z as f32).max(child_bounds.min_position.z),
+                                )),
+                            ),
+                        ));
+                        for (direction, side) in [
+                            (V3c::new(-1., 0., 0.), CubeSides::Right),
+                            (V3c::new(1., 0., 0.), CubeSides::Left),
+                            (V3c::new(0., -1., 0.), CubeSides::Top),
+                            (V3c::new(0., 1., 0.), CubeSides::Bottom),
+                            (V3c::new(0., 0., -1.), CubeSides::Front),
+                            (V3c::new(0., 0., 1.), CubeSides::Back),
+                        ]
+                        .iter()
+                        {
+                            if let Some((sibling_node, _sibling_sectant)) =
+                                self.get_sibling_by_stack(*direction, &node_stack)
+                            {
+                                self.nodes.get_mut(sibling_node).set_occlusion(*side, false);
+                            }
+                        }
+                        node_stack.pop();
+                    }
+                    self.nodes.free(child_key);
+                }
+
+                self.nodes
+                    .get_mut(node_key)
+                    .clear_child(child_sectant as usize);
+            }
         }
 
         let mut new_occupied_bits = self.nodes.get(node_key).occupied_bits;
@@ -369,6 +458,25 @@ impl<
             self.nodes.get(node_key).children,
         );
 
+        // Update sibling nodes occlusion bits ( direction paired with opposite side on sibling node )
+        if self.nodes.get_mut(node_key).occupied_bits == u64::MAX && new_occupied_bits != u64::MAX {
+            for (direction, side) in [
+                (V3c::new(-1., 0., 0.), CubeSides::Right),
+                (V3c::new(1., 0., 0.), CubeSides::Left),
+                (V3c::new(0., -1., 0.), CubeSides::Top),
+                (V3c::new(0., 1., 0.), CubeSides::Bottom),
+                (V3c::new(0., 0., -1.), CubeSides::Front),
+                (V3c::new(0., 0., 1.), CubeSides::Back),
+            ]
+            .iter()
+            {
+                if let Some((sibling_node, _sibling_sectant)) =
+                    self.get_sibling_by_stack(*direction, node_stack)
+                {
+                    self.nodes.get_mut(sibling_node).set_occlusion(*side, false);
+                }
+            }
+        }
         self.nodes.get_mut(node_key).occupied_bits = new_occupied_bits;
         self.update_mip(node_key, node_bounds, clear_position);
 

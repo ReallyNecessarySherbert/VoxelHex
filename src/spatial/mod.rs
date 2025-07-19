@@ -13,6 +13,16 @@ use crate::{
     spatial::math::vector::V3c,
 };
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum CubeSides {
+    Back = 0,
+    Front = 1,
+    Top = 2,
+    Bottom = 3,
+    Left = 4,
+    Right = 5,
+}
+
 #[derive(Default, Clone, Copy, Debug)]
 #[cfg_attr(
     feature = "serialization",
