@@ -1,7 +1,7 @@
 use crate::{
     boxtree::{
+        BOX_NODE_CHILDREN_COUNT, BoxTree, OOB_SECTANT, V3c, VoxelData,
         types::{BrickData, NodeContent},
-        BoxTree, V3c, VoxelData, BOX_NODE_CHILDREN_COUNT, OOB_SECTANT,
     },
     object_pool::empty_marker,
     raytracing::bevy::types::{
@@ -9,7 +9,6 @@ use crate::{
         NodeUploadRequest,
     },
 };
-use bendy::{decoding::FromBencode, encoding::ToBencode};
 use std::hash::Hash;
 
 impl BoxTreeGPUDataHandler {
@@ -144,10 +143,11 @@ impl BoxTreeGPUDataHandler {
             }
             NodeContent::Internal(_occupied_bits) => {
                 debug_assert!(
-                        self.upload_targets.node_key_vs_meta_index
-                            .contains_right(&child_descriptor),
-                        "Expected erased child node index[{child_descriptor}] to be in metadata index hash!"
-                    );
+                    self.upload_targets
+                        .node_key_vs_meta_index
+                        .contains_right(&child_descriptor),
+                    "Expected erased child node index[{child_descriptor}] to be in metadata index hash!"
+                );
                 let child_key = self
                     .upload_targets
                     .node_key_vs_meta_index
@@ -239,33 +239,7 @@ impl BoxTreeGPUDataHandler {
     /// Writes: metadata, available child information, occupied bits and parent connections
     /// It will try to collecty MIP information if still available, but will not upload a MIP
     /// * `returns` - Returns the meta index of the added node, the modified nodes and bricks updates for the insertion
-    pub(crate) fn add_node<
-        'a,
-        #[cfg(all(feature = "bytecode", feature = "serialization"))] T: FromBencode
-            + ToBencode
-            + Serialize
-            + DeserializeOwned
-            + Default
-            + Eq
-            + Clone
-            + Hash
-            + VoxelData
-            + Send
-            + Sync
-            + 'static,
-        #[cfg(all(feature = "bytecode", not(feature = "serialization")))] T: FromBencode + ToBencode + Default + Eq + Clone + Hash + VoxelData + Send + Sync + 'static,
-        #[cfg(all(not(feature = "bytecode"), feature = "serialization"))] T: Serialize
-            + DeserializeOwned
-            + Default
-            + Eq
-            + Clone
-            + Hash
-            + VoxelData
-            + Send
-            + Sync
-            + 'static,
-        #[cfg(all(not(feature = "bytecode"), not(feature = "serialization")))] T: Default + Eq + Clone + Hash + VoxelData,
-    >(
+    pub(crate) fn add_node<'a, T: VoxelData>(
         &mut self,
         tree: &'a BoxTree<T>,
         node_upload_request: &NodeUploadRequest,
@@ -503,10 +477,11 @@ impl BoxTreeGPUDataHandler {
                     break;
                 }
                 BrickOwnedBy::NodeAsMIP(node_key) => {
-                    debug_assert!(self
-                        .upload_targets
-                        .node_key_vs_meta_index
-                        .contains_left(&(node_key as usize)));
+                    debug_assert!(
+                        self.upload_targets
+                            .node_key_vs_meta_index
+                            .contains_left(&(node_key as usize))
+                    );
                     if
                         // in case the node is not inside the node upload list
                         !self.upload_targets.nodes_to_see.contains(&(node_key as usize))

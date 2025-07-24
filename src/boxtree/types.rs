@@ -1,8 +1,8 @@
 use crate::{boxtree::BOX_NODE_CHILDREN_COUNT, object_pool::ObjectPool};
 use std::{collections::HashMap, error::Error, hash::Hash};
 
-#[cfg(feature = "serialization")]
-use serde::{Deserialize, Serialize};
+#[cfg(feature = "bytecode")]
+use bendy::{decoding::FromBencode, encoding::ToBencode};
 
 /// error types during usage or creation of the boxtree
 #[derive(Debug)]
@@ -38,7 +38,6 @@ pub enum BoxTreeEntry<'a, T: VoxelData> {
 
 /// Data representation for a matrix of voxels
 #[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
 pub(crate) enum BrickData<T>
 where
     T: Clone + PartialEq + Clone,
@@ -54,7 +53,6 @@ where
 }
 
 #[derive(Debug, Default, Clone, PartialEq)]
-#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
 pub(crate) enum NodeContent<T>
 where
     T: Clone + PartialEq + Clone,
@@ -74,7 +72,6 @@ where
 }
 
 #[derive(Default, Copy, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
 pub(crate) enum NodeChildren<T: Default> {
     #[default]
     NoChildren,
@@ -83,13 +80,26 @@ pub(crate) enum NodeChildren<T: Default> {
 }
 
 /// Trait for User Defined Voxel Data
-pub trait VoxelData {
+pub trait VoxelData:
+    Default + Eq + Clone + Hash + Send + Sync + 'static + SerializableVoxelData
+{
     /// Determines if the voxel is to be hit by rays in the raytracing algorithms
     fn is_empty(&self) -> bool;
 }
 
+#[cfg(feature = "bytecode")]
+pub trait SerializableVoxelData: FromBencode + ToBencode {}
+
+#[cfg(not(feature = "bytecode"))]
+pub trait SerializableVoxelData {}
+
+#[cfg(feature = "bytecode")]
+impl<T> SerializableVoxelData for T where T: FromBencode + ToBencode {}
+
+#[cfg(not(feature = "bytecode"))]
+impl<T> SerializableVoxelData for T {}
+
 /// Color properties of a voxel
-#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Albedo {
     pub r: u8,
@@ -165,7 +175,6 @@ pub struct MIPMapStrategy {
 /// A Brick is a 3 dimensional matrix, each element of it containing a voxel.
 /// A Brick can be indexed directly, as opposed to the boxtree which is essentially a
 /// tree-graph where each node has 64 children.
-#[cfg_attr(feature = "serialization", derive(Serialize))]
 #[derive(Clone)]
 pub struct BoxTree<T = u32>
 where
@@ -193,11 +202,9 @@ where
     pub(crate) voxel_data_palette: Vec<T>, // referenced by @nodes
 
     /// Cache variable to help find colors inside the color palette
-    #[cfg_attr(feature = "serialization", serde(skip_serializing, skip_deserializing))]
     pub(crate) map_to_color_index_in_palette: HashMap<Albedo, usize>,
 
     /// Cache variable to help find user data in the palette
-    #[cfg_attr(feature = "serialization", serde(skip_serializing, skip_deserializing))]
     pub(crate) map_to_data_index_in_palette: HashMap<T, usize>,
 
     /// Feature flag to enable/disable simplification attempts during boxtree update operations

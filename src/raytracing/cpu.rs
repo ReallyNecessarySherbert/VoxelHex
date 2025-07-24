@@ -1,17 +1,15 @@
 use crate::{
     boxtree::{
+        BOX_NODE_DIMENSION, BoxTree, BoxTreeEntry, OOB_SECTANT, V3c, VoxelData,
         types::{BrickData, NodeChildren, NodeContent, PaletteIndexValues},
-        BoxTree, BoxTreeEntry, V3c, VoxelData, BOX_NODE_DIMENSION, OOB_SECTANT,
     },
     spatial::{
+        Cube,
         lut::RAY_TO_NODE_OCCUPANCY_BITMASK_LUT,
         math::{flat_projection, hash_direction, offset_sectant},
-        raytracing::{cube_impact_normal, step_sectant, Ray},
-        Cube,
+        raytracing::{Ray, cube_impact_normal, step_sectant},
     },
 };
-use bendy::{decoding::FromBencode, encoding::ToBencode};
-use std::hash::Hash;
 
 #[cfg(debug_assertions)]
 use crate::spatial::math::FLOAT_ERROR_TOLERANCE;
@@ -81,21 +79,7 @@ where
     }
 }
 
-impl<
-        #[cfg(all(feature = "bytecode", feature = "serialization"))] T: FromBencode
-            + ToBencode
-            + Serialize
-            + DeserializeOwned
-            + Default
-            + Eq
-            + Clone
-            + Hash
-            + VoxelData,
-        #[cfg(all(feature = "bytecode", not(feature = "serialization")))] T: FromBencode + ToBencode + Default + Eq + Clone + Hash + VoxelData,
-        #[cfg(all(not(feature = "bytecode"), feature = "serialization"))] T: Serialize + DeserializeOwned + Default + Eq + Clone + Hash + VoxelData,
-        #[cfg(all(not(feature = "bytecode"), not(feature = "serialization")))] T: Default + Eq + Clone + Hash + VoxelData,
-    > BoxTree<T>
-{
+impl<T: VoxelData> BoxTree<T> {
     pub(crate) fn get_dda_scale_factors(ray: &Ray) -> V3c<f32> {
         V3c::new(
             (1. + (ray.direction.z / ray.direction.x).powf(2.)
@@ -260,7 +244,7 @@ impl<
         brick: &BrickData<PaletteIndexValues>,
         brick_bounds: &Cube,
         ray_scale_factors: &V3c<f32>,
-    ) -> Option<(BoxTreeEntry<T>, V3c<f32>, V3c<f32>)> {
+    ) -> Option<(BoxTreeEntry<'_, T>, V3c<f32>, V3c<f32>)> {
         match brick {
             BrickData::Empty => {
                 // No need to do anything, iteration continues with "leaf miss"
@@ -313,7 +297,7 @@ impl<
 
     /// Provides the collision point of the given ray with the contained voxel field,
     /// Returns a reference of the contained data, collision point and normal at impact, if any
-    pub fn get_by_ray(&self, ray: &Ray) -> Option<(BoxTreeEntry<T>, V3c<f32>, V3c<f32>)> {
+    pub fn get_by_ray(&self, ray: &Ray) -> Option<(BoxTreeEntry<'_, T>, V3c<f32>, V3c<f32>)> {
         // Pre-calculated optimization variables
         let ray_scale_factors = Self::get_dda_scale_factors(ray);
         let direction_lut_index = hash_direction(&ray.direction) as usize;
@@ -341,9 +325,10 @@ impl<
             while !node_stack.is_empty() {
                 let current_node_occupied_bits =
                     self.stored_occupied_bits(*node_stack.last().unwrap() as usize);
-                debug_assert!(self
-                    .nodes
-                    .key_is_valid(*node_stack.last().unwrap() as usize));
+                debug_assert!(
+                    self.nodes
+                        .key_is_valid(*node_stack.last().unwrap() as usize)
+                );
 
                 let mut do_backtrack_after_leaf_miss = matches!(
                     self.nodes.get(current_node_key),
@@ -420,7 +405,7 @@ impl<
                         current_node_key = *parent as usize;
                     }
                     continue; // Restart loop with the parent Node
-                              // Eliminating this `continue` causes significant slowdown in GPU?!
+                    // Eliminating this `continue` causes significant slowdown in GPU?!
                 }
 
                 if matches!(self.nodes.get(current_node_key), NodeContent::Internal(_))

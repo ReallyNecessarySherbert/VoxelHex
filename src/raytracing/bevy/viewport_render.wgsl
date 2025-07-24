@@ -872,6 +872,9 @@ struct Viewport {
     direction: vec3f,
     frustum: vec3f,
     fov: f32,
+    view_matrix: mat4x4<f32>,
+    projection_matrix: mat4x4<f32>,
+    inverse_view_projection_matrix: mat4x4<f32>,
 }
 
 struct RenderStageData {
@@ -915,25 +918,23 @@ var<storage, read> color_palette: array<vec4f>;
 
 @compute @workgroup_size(8, 8, 1)
 fn update(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
-    let viewport_right_direction = normalize(cross(vec3f(0., 1., 0.), viewport.direction));
-    let ray_endpoint =
-        (
-            viewport.origin
-            + (viewport.direction * viewport.fov)
-            - (viewport_right_direction * (viewport.frustum.x / 2.))
-            - (vec3f(0., 1., 0.) * (viewport.frustum.y / 2.))
-        ) // Viewport bottom left
-        + (
-            viewport_right_direction
-            * viewport.frustum.x
-            * (f32(invocation_id.x) / f32(stage_data.output_resolution.x))
-        ) // Viewport right direction
-        + (
-            vec3f(0., 1., 0.) * viewport.frustum.y
-            * (1. - (f32(invocation_id.y) / f32(stage_data.output_resolution.y)))
-        ) // Viewport up direction
-        ;
-    var ray = Line(ray_endpoint, normalize(ray_endpoint - viewport.origin));
+    // Calculate NDC (Normalized Device Coordinates) from pixel coordinates
+    let ndc_x = (f32(invocation_id.x) + 0.5) / f32(stage_data.output_resolution.x) * 2.0 - 1.0;
+    let ndc_y = -((f32(invocation_id.y) + 0.5) / f32(stage_data.output_resolution.y) * 2.0 - 1.0);
+    
+    let ndc_near = vec4f(ndc_x, ndc_y, -1.0, 1.0); // near plane in NDC
+    let ndc_far = vec4f(ndc_x, ndc_y, 1.0, 1.0); // far plane in NDC
+    
+    // Transform NDC coordinates to world space
+    let world_near = viewport.inverse_view_projection_matrix * ndc_near;
+    let world_far = viewport.inverse_view_projection_matrix * ndc_far;
+    
+    let world_near_pos = world_near.xyz / world_near.w;
+    let world_far_pos = world_far.xyz / world_far.w;
+    
+    let ray_direction = normalize(world_far_pos - world_near_pos);
+    
+    var ray = Line(viewport.origin, ray_direction);
     if stage_data.stage == VHX_PREPASS_STAGE_ID {
         // In preprocess, for every pixel in the depth texture, traverse the model until
         // either there's a hit or the voxels are too far away to determine 

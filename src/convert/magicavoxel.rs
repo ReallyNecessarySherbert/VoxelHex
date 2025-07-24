@@ -1,20 +1,14 @@
 use crate::{
     boxtree::{
         types::{MIPMapStrategy, OctreeError},
-        Albedo, BoxTree, BoxTreeEntry, V3c, VoxelData,
+        Albedo, BoxTree, BoxTreeEntry, VoxelData, V3c,
     },
     spatial::math::{convert_coordinate, CoordinateSystemType},
 };
 use dot_vox::{Color, DotVoxData, Model, SceneNode, Size, Voxel};
 use nalgebra::Matrix3;
 use num_traits::Num;
-use std::{convert::From, hash::Hash, path::Path};
-
-#[cfg(feature = "serialization")]
-use serde::{de::DeserializeOwned, Serialize};
-
-#[cfg(feature = "bytecode")]
-use bendy::{decoding::FromBencode, encoding::ToBencode};
+use std::{convert::From, path::Path};
 
 impl From<Albedo> for Color {
     fn from(color: Albedo) -> Self {
@@ -209,21 +203,7 @@ fn iterate_vox_tree<F: FnMut(&Model, &V3c<i32>, &Matrix3<i8>)>(
 }
 
 impl MIPMapStrategy {
-    pub fn load_vox_file<
-        P: AsRef<Path>,
-        #[cfg(all(feature = "bytecode", feature = "serialization"))] T: FromBencode
-            + ToBencode
-            + Serialize
-            + DeserializeOwned
-            + Default
-            + Eq
-            + Clone
-            + Hash
-            + VoxelData,
-        #[cfg(all(feature = "bytecode", not(feature = "serialization")))] T: FromBencode + ToBencode + Default + Eq + Clone + Hash + VoxelData,
-        #[cfg(all(not(feature = "bytecode"), feature = "serialization"))] T: Serialize + DeserializeOwned + Default + Eq + Clone + Hash + VoxelData,
-        #[cfg(all(not(feature = "bytecode"), not(feature = "serialization")))] T: Default + Eq + Clone + Hash + VoxelData,
-    >(
+    pub fn load_vox_file<P: AsRef<Path>, T: VoxelData>(
         self,
         brick_dimension: u32,
         filename: &str,
@@ -254,20 +234,7 @@ impl MIPMapStrategy {
     }
 }
 
-impl<
-        #[cfg(all(feature = "bytecode", feature = "serialization"))] T: FromBencode
-            + ToBencode
-            + Serialize
-            + DeserializeOwned
-            + Default
-            + Eq
-            + Clone
-            + Hash
-            + VoxelData,
-        #[cfg(all(feature = "bytecode", not(feature = "serialization")))] T: FromBencode + ToBencode + Default + Eq + Clone + Hash + VoxelData,
-        #[cfg(all(not(feature = "bytecode"), feature = "serialization"))] T: Serialize + DeserializeOwned + Default + Eq + Clone + Hash + VoxelData,
-        #[cfg(all(not(feature = "bytecode"), not(feature = "serialization")))] T: Default + Eq + Clone + Hash + VoxelData,
-    > BoxTree<T>
+impl<T: VoxelData> BoxTree<T>
 {
     pub fn load_vox_file(filename: &str, brick_dimension: u32) -> Result<Self, &'static str> {
         let (vox_data, min_position, mut max_position) = Self::load_vox_file_internal(filename);

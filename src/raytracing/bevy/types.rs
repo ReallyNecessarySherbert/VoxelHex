@@ -1,5 +1,5 @@
 use crate::{
-    boxtree::{types::PaletteIndexValues, BoxTree, V3c, V3cf32, VoxelData},
+    boxtree::{BoxTree, V3c, V3cf32, VoxelData, types::PaletteIndexValues},
     spatial::Cube,
 };
 use bevy::{
@@ -74,6 +74,15 @@ pub struct Viewport {
 
     /// Field of View: how scattered will the rays in the viewport are
     pub fov: f32,
+
+    /// Pre-computed view matrix (camera transform)
+    pub view_matrix: bevy::math::Mat4,
+
+    /// Pre-computed projection matrix
+    pub projection_matrix: bevy::math::Mat4,
+
+    /// Pre-computed inverse view projection matrix
+    pub inverse_view_projection_matrix: bevy::math::Mat4,
 }
 
 #[derive(Resource, Clone, TypePath, ExtractResource)]

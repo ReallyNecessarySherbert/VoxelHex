@@ -19,16 +19,13 @@ pub use types::{
 
 use crate::{
     boxtree::types::{BrickData, NodeChildren, NodeContent, OctreeError, PaletteIndexValues},
-    object_pool::{empty_marker, ObjectPool},
+    object_pool::{ObjectPool, empty_marker},
     spatial::{
-        math::{flat_projection, matrix_index_for},
         Cube,
+        math::{flat_projection, matrix_index_for},
     },
 };
-use std::{collections::HashMap, hash::Hash, path::Path};
-
-#[cfg(feature = "serialization")]
-use serde::{de::DeserializeOwned, Serialize};
+use std::{collections::HashMap, path::Path};
 
 #[cfg(feature = "bytecode")]
 use bendy::{decoding::FromBencode, encoding::ToBencode};
@@ -147,21 +144,7 @@ macro_rules! make_tree {
     };
 }
 
-impl<
-        #[cfg(all(feature = "bytecode", feature = "serialization"))] T: FromBencode
-            + ToBencode
-            + Serialize
-            + DeserializeOwned
-            + Default
-            + Eq
-            + Clone
-            + Hash
-            + VoxelData,
-        #[cfg(all(feature = "bytecode", not(feature = "serialization")))] T: FromBencode + ToBencode + Default + Eq + Clone + Hash + VoxelData,
-        #[cfg(all(not(feature = "bytecode"), feature = "serialization"))] T: Serialize + DeserializeOwned + Default + Eq + Clone + Hash + VoxelData,
-        #[cfg(all(not(feature = "bytecode"), not(feature = "serialization")))] T: Default + Eq + Clone + Hash + VoxelData,
-    > BoxTree<T>
-{
+impl<T: VoxelData> BoxTree<T> {
     /// converts the data structure to a byte representation
     #[cfg(feature = "bytecode")]
     pub fn to_bytes(&self) -> Vec<u8> {
@@ -239,7 +222,7 @@ impl<
 
     /// Getter function for the boxtree
     /// * Returns immutable reference to the data at the given position, if there is any
-    pub fn get(&self, position: &V3c<u32>) -> BoxTreeEntry<T> {
+    pub fn get(&self, position: &V3c<u32>) -> BoxTreeEntry<'_, T> {
         NodeContent::pix_get_ref(
             &self.get_internal(
                 Self::ROOT_NODE_KEY as usize,
@@ -257,7 +240,7 @@ impl<
     }
 
     /// Object to set the MIP map strategy for each MIP level inside the boxtree
-    pub fn albedo_mip_map_resampling_strategy(&mut self) -> StrategyUpdater<T> {
+    pub fn albedo_mip_map_resampling_strategy(&mut self) -> StrategyUpdater<'_, T> {
         StrategyUpdater(self)
     }
 
