@@ -9,7 +9,7 @@ authors = ["Dávid Tóth <toth.david.munka@gmail.com>"]
 license = "MIT OR Apache-2.0"
 
 [features]
-default = ["raytracing","bytecode", "dot_vox_support"]
+default = ["bevy_wgpu","bytecode", "dot_vox_support"]
 raytracing = []
 bytecode = ["dep:bendy"]
 serialization = ["dep:serde"]

@@ -23,7 +23,7 @@ pub(crate) enum CubeSides {
     Right = 5,
 }
 
-#[derive(Default, Clone, Copy, Debug)]
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
 #[cfg_attr(
     feature = "serialization",
     derive(serde::Serialize, serde::Deserialize)

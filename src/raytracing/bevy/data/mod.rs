@@ -2,15 +2,18 @@ mod cache;
 pub(crate) mod upload_queue;
 
 use crate::{
-    boxtree::{BoxTree, V3c, VoxelData, BOX_NODE_CHILDREN_COUNT},
+    boxtree::{BoxTree, VoxelData, BOX_NODE_CHILDREN_COUNT},
     object_pool::empty_marker,
-    raytracing::bevy::types::BoxTreeGPUView,
+    raytracing::bevy::types::{BoxTreeGPUView, BrickOwnedBy},
 };
 use bevy::render::{
     render_resource::{encase::internal::WriteInto, Buffer, ShaderSize},
     renderer::RenderQueue,
 };
-use std::{hash::Hash, ops::Range};
+use std::{
+    hash::{Hash, Hasher},
+    ops::Range,
+};
 
 pub(crate) fn boxtree_properties<
     #[cfg(all(feature = "bytecode", feature = "serialization"))] T: FromBencode
@@ -34,26 +37,7 @@ pub(crate) fn boxtree_properties<
 /// Invalidates view to be rebuilt on the size needed by bricks and nodes
 pub(crate) fn re_evaluate_view_size(view: &mut BoxTreeGPUView) {
     // Decide if there's enough space to host the required number of nodes
-    let nodes_needed_overall = view
-        .data_handler
-        .upload_targets
-        .population
-        .node_upload_queue
-        .iter()
-        .skip(view.data_handler.upload_state.node_upload_progress)
-        .filter(|item| {
-            !view
-                .data_handler
-                .upload_targets
-                .node_key_vs_meta_index
-                .contains_right(&item.node_key)
-        })
-        .count()
-        + view
-            .data_handler
-            .upload_targets
-            .node_key_vs_meta_index
-            .len();
+    let nodes_needed_overall = view.data_handler.upload_targets.nodes_to_see.len();
     let rebuild_nodes = nodes_needed_overall > view.data_handler.nodes_in_view;
 
     if rebuild_nodes {
@@ -73,23 +57,7 @@ pub(crate) fn re_evaluate_view_size(view: &mut BoxTreeGPUView) {
     }
 
     // Decide if there's enough space to host the required number of bricks
-    let bricks_needed_overall = view
-        .data_handler
-        .upload_targets
-        .population
-        .brick_upload_queue
-        .iter()
-        .skip(view.data_handler.upload_state.brick_upload_progress)
-        .filter(|item| {
-            !view
-                .data_handler
-                .upload_targets
-                .brick_ownership
-                .read()
-                .expect("Expected to be able to read brick ownership entries")
-                .contains_right(&item.ownership)
-        })
-        .count()
+    let bricks_needed_overall = view.data_handler.upload_state.bricks_to_upload.len()
         + view
             .data_handler
             .upload_targets
@@ -102,10 +70,6 @@ pub(crate) fn re_evaluate_view_size(view: &mut BoxTreeGPUView) {
     if rebuild_bricks {
         let new_brick_count = (bricks_needed_overall as f32 * 1.1) as usize;
         view.data_handler.bricks_in_view = new_brick_count;
-        view.data_handler
-            .upload_targets
-            .brick_positions
-            .resize(new_brick_count, V3c::default());
     }
 
     debug_assert!(
@@ -141,6 +105,25 @@ fn write_range_to_buffer<U>(
         });
         unsafe {
             render_queue.write_buffer(buffer, byte_offset, slice.align_to::<u8>().1);
+        }
+    }
+}
+
+impl Hash for BrickOwnedBy {
+    fn hash<H: Hasher>(&self, state: &mut H) -> () {
+        match self {
+            BrickOwnedBy::NodeAsChild(node_key, child_sectant, _brick_position) => {
+                0.hash(state);
+                node_key.hash(state);
+                child_sectant.hash(state)
+            }
+            BrickOwnedBy::NodeAsMIP(node_key) => {
+                1.hash(state);
+                node_key.hash(state);
+            }
+            BrickOwnedBy::None => {
+                2.hash(state);
+            }
         }
     }
 }

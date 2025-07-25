@@ -8,7 +8,7 @@ use crate::{
     raytracing::{
         bevy::{
             data::boxtree_properties,
-            types::{UploadQueuePopulation, UploadQueueStatus, UploadQueueTargets},
+            types::{UploadQueueStatus, UploadQueueTargets},
         },
         BoxTreeRenderData,
     },
@@ -26,7 +26,7 @@ use bevy::{
 };
 use bimap::BiHashMap;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     hash::Hash,
     sync::{Arc, RwLock},
 };
@@ -117,24 +117,23 @@ impl<
                 color_palette: vec![Vec4::ZERO; u16::MAX as usize],
             },
             upload_targets: UploadQueueTargets {
-                population: UploadQueuePopulation::default(),
+                nodes_to_see: HashSet::new(),
                 brick_ownership: Arc::default(),
-                brick_positions: vec![V3c::unit(0.); bricks_in_view],
                 node_key_vs_meta_index: BiHashMap::new(),
                 node_index_vs_parent: HashMap::new(),
             },
             upload_state: UploadQueueStatus {
                 victim_node: 0,
                 victim_brick: 0,
-                node_upload_progress: 0,
-                brick_upload_progress: 0,
+                bricks_to_upload: vec![],
+                target_node_stack: vec![],
                 uploaded_color_palette_size: 0,
             },
             pending_upload_queue_update: None,
             nodes_in_view,
             bricks_in_view,
-            node_uploads_per_frame: 4,
-            brick_uploads_per_frame: 4,
+            node_uploads_per_frame: 50,
+            brick_uploads_per_frame: 50,
             brick_unload_search_perimeter: 8,
         };
         let output_texture = create_output_texture(resolution, &mut images);

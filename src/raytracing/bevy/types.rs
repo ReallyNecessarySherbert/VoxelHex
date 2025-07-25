@@ -86,10 +86,15 @@ where
     pub tree: Arc<RwLock<BoxTree<T>>>,
 }
 
+/// Container for all the views rendered by the library instance
 #[derive(Debug, Resource, Clone, TypePath)]
 #[type_path = "shocovox::gpu::VhxViewSet"]
 pub struct VhxViewSet {
+    /// dirty bit which is being set for large changes
+    /// e.g. new output textures need to be generated
     pub(crate) changed: bool,
+
+    /// Thread safe container for the contained views currently rendered
     pub(crate) views: Vec<Arc<RwLock<BoxTreeGPUView>>>,
 }
 
@@ -148,36 +153,12 @@ pub struct BoxTreeGPUView {
     pub(crate) brick_slot: Cube,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// Brick ownerhip, complete with brick position whenever relevant
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum BrickOwnedBy {
     None,
-    NodeAsChild(u32, u8),
+    NodeAsChild(u32, u8, V3c<u32>),
     NodeAsMIP(u32),
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct NodeUploadRequest {
-    pub(crate) node_key: usize,
-    pub(crate) parent_key: usize,
-    pub(crate) sectant: u8,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct BrickUploadRequest {
-    pub(crate) ownership: BrickOwnedBy,
-    pub(crate) min_position: V3cf32,
-}
-
-#[derive(Debug, Default, Clone)]
-pub(crate) struct UploadQueuePopulation {
-    /// List of all the nodes to upload to the GPU.
-    pub(crate) node_upload_queue: Vec<NodeUploadRequest>,
-
-    /// This is a list of the bricks to upload to the GPU (bricks not yet uploaded)
-    pub(crate) brick_upload_queue: Vec<BrickUploadRequest>,
-
-    /// A set containing all nodes which should be on the GPU
-    pub(crate) nodes_to_see: HashSet<usize>,
 }
 
 pub(crate) type BrickOwnership = Arc<RwLock<BiHashMap<usize, BrickOwnedBy>>>;
@@ -189,9 +170,6 @@ pub(crate) struct UploadQueueTargets {
     /// Map to connect brick indexes in GPU data to their counterparts in the tree
     pub(crate) brick_ownership: BrickOwnership,
 
-    /// Centerpoint of each brick; Valid only if the brick is owned!
-    pub(crate) brick_positions: Vec<V3c<f32>>,
-
     /// Map to connect tree node keys to node meta indexes
     pub(crate) node_key_vs_meta_index: BiHashMap<usize, usize>,
 
@@ -199,19 +177,18 @@ pub(crate) struct UploadQueueTargets {
     /// Mapping is as following: node_index -> (parent_index, child_sectant)
     pub(crate) node_index_vs_parent: HashMap<usize, (usize, u8)>,
 
-    /// Nodes and bricks that should be present within the GPU
-    pub(crate) population: UploadQueuePopulation,
+    /// A set containing all nodes which should be on the GPU
+    pub(crate) nodes_to_see: HashSet<usize>,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct UploadQueueStatus {
-    /// The number of nodes already uploaded into the GPU
-    /// from @node_upload_queue
-    pub(crate) node_upload_progress: usize,
+    /// Access stack of the node and its target sectant
+    /// which is being evaluated for upload
+    pub(crate) target_node_stack: Vec<(usize, u8, Cube)>,
 
-    /// The number of bricks already uploaded into the GPU
-    /// from @node_upload_queue
-    pub(crate) brick_upload_progress: usize,
+    /// List of bricks to upload to the GPU
+    pub(crate) bricks_to_upload: Vec<BrickOwnedBy>,
 
     /// Index pointing inside GPU data where the search will start
     /// for the next brick to be overwritten
@@ -260,7 +237,7 @@ pub struct BoxTreeGPUDataHandler {
 }
 
 #[derive(Resource)]
-pub(crate) struct UploadQueueUpdateTask(pub(crate) Task<UploadQueuePopulation>);
+pub(crate) struct UploadQueueUpdateTask(pub(crate) Task<HashSet<usize>>);
 
 #[derive(Debug, Clone)]
 pub(crate) struct BoxTreeRenderDataResources {

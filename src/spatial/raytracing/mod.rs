@@ -22,6 +22,21 @@ impl Ray {
     }
 }
 
+/// Returns true if any part of the given target is within the given viewport
+pub(crate) fn viewport_contains_target(
+    viewport_bl: &V3c<u32>,
+    view_distance: f32,
+    start_position_in_target: &V3c<u32>,
+    update_size_in_target: &V3c<u32>,
+) -> bool {
+    !((viewport_bl.x + view_distance as u32) <= start_position_in_target.x
+        || (start_position_in_target.x + update_size_in_target.x) <= viewport_bl.x
+        || (viewport_bl.y + view_distance as u32) <= start_position_in_target.y
+        || (start_position_in_target.y + update_size_in_target.y) <= viewport_bl.y
+        || (viewport_bl.z + view_distance as u32) <= start_position_in_target.z
+        || (start_position_in_target.z + update_size_in_target.z) <= viewport_bl.z)
+}
+
 #[derive(Debug, Copy, Clone, Default)]
 pub struct CubeRayIntersection {
     pub(crate) impact_distance: Option<f32>,
@@ -65,7 +80,7 @@ impl Cube {
     #[cfg(feature = "bevy_wgpu")]
     pub(crate) fn brick_slot_for(position: &V3cf32, brick_dim: u32) -> Cube {
         Cube {
-            min_position: *position - (*position % brick_dim as f32),
+            min_position: *position - *(*position % brick_dim as f32).abs(),
             size: brick_dim as f32,
         }
     }

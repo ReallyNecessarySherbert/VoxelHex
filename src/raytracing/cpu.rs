@@ -1,6 +1,6 @@
 use crate::{
     boxtree::{
-        types::{BrickData, NodeChildren, NodeContent, PaletteIndexValues},
+        types::{BrickData, NodeContent, PaletteIndexValues},
         BoxTree, BoxTreeEntry, V3c, VoxelData, BOX_NODE_CHILDREN_COUNT, BOX_NODE_DIMENSION,
     },
     spatial::{
