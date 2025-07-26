@@ -1,8 +1,7 @@
 use crate::{
     boxtree::{
-        types::{BrickData, NodeContent},
-        Albedo, BoxTree, MIPResamplingMethods, VoxelData, BOX_NODE_CHILDREN_COUNT,
-        BOX_NODE_DIMENSION,
+        types::NodeContent, Albedo, BoxTree, MIPResamplingMethods, VoxelData,
+        BOX_NODE_CHILDREN_COUNT, BOX_NODE_DIMENSION,
     },
     spatial::{
         math::vector::{V3c, V3cf32},

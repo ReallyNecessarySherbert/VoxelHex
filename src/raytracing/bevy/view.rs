@@ -1,13 +1,15 @@
-pub use crate::raytracing::bevy::types::{
-    BoxTreeGPUDataHandler, BoxTreeGPUHost, BoxTreeGPUView, BoxTreeMetaData, BoxTreeSpyGlass,
-    VhxViewSet, Viewport,
+pub use crate::raytracing::bevy::{
+    streaming::types::BoxTreeGPUDataHandler,
+    types::{
+        BoxTreeGPUHost, BoxTreeGPUView, BoxTreeMetaData, BoxTreeSpyGlass, VhxViewSet, Viewport,
+    },
 };
 use crate::{
     boxtree::{V3c, V3cf32, VoxelData, BOX_NODE_CHILDREN_COUNT},
     object_pool::empty_marker,
     raytracing::{
-        bevy::{
-            data::boxtree_properties,
+        bevy::streaming::{
+            boxtree_properties,
             types::{UploadQueueStatus, UploadQueueTargets},
         },
         BoxTreeRenderData,
@@ -26,7 +28,7 @@ use bevy::{
 };
 use bimap::BiHashMap;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     hash::Hash,
     sync::{Arc, RwLock},
 };
@@ -117,7 +119,7 @@ impl<
                 color_palette: vec![Vec4::ZERO; u16::MAX as usize],
             },
             upload_targets: UploadQueueTargets {
-                nodes_to_see: HashSet::new(),
+                nodes_to_see: Arc::default(),
                 brick_ownership: Arc::default(),
                 node_key_vs_meta_index: BiHashMap::new(),
                 node_index_vs_parent: HashMap::new(),
@@ -166,6 +168,7 @@ impl BoxTreeGPUView {
     /// Erases the whole view to be uploaded to the GPU again
     pub fn reload(&mut self) {
         self.data_handler.upload_targets.reset();
+        self.data_handler.upload_state.bricks_to_upload.clear();
         self.reload = true;
     }
 

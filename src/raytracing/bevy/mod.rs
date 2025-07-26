@@ -1,5 +1,5 @@
-mod data;
 mod pipeline;
+mod streaming;
 pub mod types;
 mod view;
 
@@ -9,9 +9,9 @@ pub use crate::raytracing::bevy::types::{
 use crate::{
     boxtree::{Albedo, BoxTree, V3c, VoxelData},
     raytracing::bevy::{
-        data::upload_queue::{rebuild, upload},
         pipeline::prepare_bind_groups,
-        types::{UploadQueueUpdateTask, VhxLabel, VhxRenderNode, VhxRenderPipeline},
+        streaming::{types::UploadQueueUpdateTask, upload, upload_queue::rebuild},
+        types::{VhxLabel, VhxRenderNode, VhxRenderPipeline},
         view::{handle_resolution_updates_main_world, handle_resolution_updates_render_world},
     },
     spatial::Cube,
@@ -136,6 +136,7 @@ fn handle_viewport_position_updates<
                     let viewing_distance = view.spyglass.viewport.frustum.z;
                     let brick_ownership = view.data_handler.upload_targets.brick_ownership.clone();
                     let tree_arc = tree_host.tree.clone();
+                    let nodes_to_see = view.data_handler.upload_targets.nodes_to_see.clone();
                     commands.insert_resource(UploadQueueUpdateTask(thread_pool.spawn(
                         async move {
                             rebuild::<T>(
@@ -145,6 +146,7 @@ fn handle_viewport_position_updates<
                                 viewport_center,
                                 viewing_distance,
                                 brick_ownership,
+                                nodes_to_see,
                             )
                         },
                     )));

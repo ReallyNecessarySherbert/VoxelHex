@@ -4,7 +4,7 @@ use crate::{
         BoxTree, V3c, V3cf32, VoxelData, BOX_NODE_CHILDREN_COUNT,
     },
     object_pool::empty_marker,
-    raytracing::bevy::types::{
+    raytracing::bevy::streaming::types::{
         BoxTreeGPUDataHandler, BrickOwnedBy, BrickUpdate, CacheUpdatePackage,
     },
 };
@@ -84,7 +84,7 @@ impl BoxTreeGPUDataHandler {
     //   ░░░░░░░░░  ░░░░░   ░░░░░ ░░░░░ ░░░░░░░░░░░ ░░░░░░░░░░
     //##############################################################################
     /// Erases the child node pointed by the given victim pointer
-    /// returns with the vector of nodes modified
+    /// returns with vector of keys to nodes modified
     fn erase_node_child<T>(
         &mut self,
         meta_index: usize,
@@ -219,6 +219,8 @@ impl BoxTreeGPUDataHandler {
                 || !self
                     .upload_targets
                     .nodes_to_see
+                    .read()
+                    .expect("Expected to be able to read list of nodes in view!")
                     .contains(victim_node_key.unwrap())
             {
                 // Victim node is not in the node upload queue, it can be overwritten!
@@ -241,7 +243,7 @@ impl BoxTreeGPUDataHandler {
     /// Writes most of the data of the given node to the first available index
     /// Writes: metadata, available child information, occupied bits and parent connections
     /// It will try to collecty MIP information if still available, but will not upload a MIP
-    /// * `returns` - Returns the meta index of the added node, the modified nodes and bricks updates for the insertion
+    /// * `returns` - The update package for the insertion
     pub(crate) fn add_node<
         'a,
         #[cfg(all(feature = "bytecode", feature = "serialization"))] T: FromBencode
@@ -273,19 +275,12 @@ impl BoxTreeGPUDataHandler {
         tree: &'a BoxTree<T>,
         parent_key: usize,
         target_sectant: u8,
-    ) -> (usize, CacheUpdatePackage<'a>) {
+    ) -> CacheUpdatePackage<'a> {
         let node_key = if target_sectant < BOX_NODE_CHILDREN_COUNT as u8 {
             tree.nodes.get(parent_key).child(target_sectant)
         } else {
             BoxTree::<T>::ROOT_NODE_KEY as usize
         };
-        let mut modifications = CacheUpdatePackage {
-            allocation_failed: false,
-            brick_update: None,
-            modified_nodes: vec![],
-        };
-
-        // Determine the new node index in meta
         debug_assert!(
             !self
                 .upload_targets
@@ -294,12 +289,25 @@ impl BoxTreeGPUDataHandler {
                 || BoxTree::<T>::ROOT_NODE_KEY == node_key as u32,
             "Trying to add already available node twice!"
         );
+        // Determine the new node index in meta
+        let mut modifications;
         let (node_index, robbed_parent) = if BoxTree::<T>::ROOT_NODE_KEY == node_key as u32 {
+            modifications = CacheUpdatePackage {
+                allocation_failed: false,
+                added_node: Some(0),
+                brick_update: None,
+                modified_nodes: vec![],
+            };
             (0, None)
         } else {
             let Some((node_index, robbed_parent)) = self.first_available_node() else {
-                modifications.allocation_failed = true;
-                return (0, modifications);
+                return CacheUpdatePackage::allocation_failed();
+            };
+            modifications = CacheUpdatePackage {
+                allocation_failed: false,
+                added_node: Some(node_index),
+                brick_update: None,
+                modified_nodes: vec![],
             };
             (node_index, robbed_parent)
         };
@@ -309,6 +317,7 @@ impl BoxTreeGPUDataHandler {
             .node_key_vs_meta_index
             .get_by_right(&node_index)
             .cloned();
+
         self.upload_targets
             .node_key_vs_meta_index
             .insert(node_key, node_index);
@@ -324,7 +333,7 @@ impl BoxTreeGPUDataHandler {
                     .node_key_vs_meta_index
                     .remove_by_right(&node_index);
             }
-            return (0, modifications);
+            return modifications;
         }
 
         // overwrite a currently present node if needed
@@ -485,7 +494,7 @@ impl BoxTreeGPUDataHandler {
                 }
             }
         };
-        (node_index, modifications)
+        modifications
     }
 
     //##############################################################################
@@ -539,7 +548,9 @@ impl BoxTreeGPUDataHandler {
                         .contains_left(&(node_key as usize)));
                     if
                         // in case the node is not inside the node upload list
-                        !self.upload_targets.nodes_to_see.contains(&(node_key as usize))
+                        !self.upload_targets.nodes_to_see.read()
+                            .expect("Expected to be able to read list of nodes in view!")
+                            .contains(&(node_key as usize))
                         // and the node have no children as bricks
                         && self.render_data.node_children.iter()
                             .skip(
@@ -613,6 +624,8 @@ impl BoxTreeGPUDataHandler {
                         if !self
                             .upload_targets
                             .nodes_to_see
+                            .read()
+                            .expect("Expected to be able to read list of nodes in view!")
                             .contains(&(node_key as usize))
                         {
                             *victim_brick = (victim_brick_index + 1) % (self.bricks_in_view);
@@ -645,11 +658,7 @@ impl BoxTreeGPUDataHandler {
         T: Default + Clone + Eq + Send + Sync + Hash + VoxelData + 'static,
     {
         let Some(brick_index) = self.first_available_brick(tree.brick_dim as f32) else {
-            return CacheUpdatePackage {
-                allocation_failed: true,
-                brick_update: None,
-                modified_nodes: vec![],
-            };
+            return CacheUpdatePackage::allocation_failed();
         };
 
         let (brick, parent_node_key, target_sectant) = match brick_request {
@@ -773,6 +782,7 @@ impl BoxTreeGPUDataHandler {
                 );
                 CacheUpdatePackage {
                     allocation_failed: false,
+                    added_node: None,
                     brick_update: Some(BrickUpdate {
                         brick_index,
                         data: &brick[..],

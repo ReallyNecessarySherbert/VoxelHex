@@ -851,13 +851,19 @@ impl<
                     }
 
                     for sectant in 1..BOX_NODE_CHILDREN_COUNT {
-                        if !self.compare_nodes(child_keys[0] as usize, child_keys[sectant] as usize)
+                        let child_key = child_keys[0] as usize;
+                        if !self.nodes.key_is_valid(child_key)
+                            || !matches!(
+                                self.nodes.get(child_key).content,
+                                NodeContent::UniformLeaf(BrickData::Solid(_))
+                            )
+                            || !self.compare_nodes(child_key, child_keys[sectant] as usize)
                         {
                             return false;
                         }
                     }
 
-                    // All children are the same!
+                    // All solid children are the same!
                     // make the current node a leaf, erase the children
                     debug_assert!(matches!(
                         self.nodes.get(child_keys[0] as usize).content,

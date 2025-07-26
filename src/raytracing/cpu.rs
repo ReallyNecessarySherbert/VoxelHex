@@ -40,10 +40,6 @@ impl<T, const SIZE: usize> NodeStack<T, SIZE>
 where
     T: Default + Copy,
 {
-    pub(crate) fn is_empty(&self) -> bool {
-        0 == self.count
-    }
-
     pub(crate) fn push(&mut self, data: T) {
         self.head_index = (self.head_index + 1) % SIZE;
         self.count = (self.count + 1).min(SIZE as u8);
