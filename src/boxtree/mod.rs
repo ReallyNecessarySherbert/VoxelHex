@@ -231,6 +231,7 @@ impl<
             map_to_color_index_in_palette: HashMap::new(),
             map_to_data_index_in_palette: HashMap::new(),
             mip_map_strategy: MIPMapStrategy::default(),
+            update_triggers: vec![],
         })
     }
 

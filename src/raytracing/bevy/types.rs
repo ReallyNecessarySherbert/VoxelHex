@@ -19,6 +19,7 @@ use bevy::{
     },
 };
 use std::{
+    collections::VecDeque,
     hash::Hash,
     sync::{Arc, RwLock},
 };
@@ -84,6 +85,10 @@ where
 {
     /// The BoxTree hosted within the bevy library
     pub tree: Arc<RwLock<BoxTree<T>>>,
+
+    /// Updates made to the tree are collected in this buffer
+    /// Changes made to nodes within the tree will automatically include them into
+    pub(crate) changes_buffer: Arc<RwLock<VecDeque<(Vec<(usize, u8)>, Vec<u8>)>>>,
 }
 
 /// Container for all the views rendered by the library instance

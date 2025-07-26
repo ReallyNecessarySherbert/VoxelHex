@@ -769,6 +769,7 @@ where
                     map_to_color_index_in_palette,
                     map_to_data_index_in_palette,
                     mip_map_strategy,
+                    update_triggers: vec![], // Cannot serialize output triggers
                 })
             }
             _ => Err(bendy::decoding::Error::unexpected_token("List", "not List")),

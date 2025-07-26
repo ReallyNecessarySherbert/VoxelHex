@@ -341,14 +341,15 @@ impl<
         let mut simplifyable = self.auto_simplify; // Don't even start to simplify if it's disabled
 
         // firstly, updated nodes on the bottom
-        for modified_bottom_sectant in modified_bottom_sectants {
+        let node_stack_clone = node_stack.clone();
+        for modified_bottom_sectant in modified_bottom_sectants.iter() {
             let (node_key, original_sectant) = node_stack.last().cloned().unwrap();
             let node_bounds = bounds_stack.last().unwrap();
-            let child_key = self.nodes.get(node_key).child(modified_bottom_sectant);
+            let child_key = self.nodes.get(node_key).child(*modified_bottom_sectant);
 
             if self.nodes.key_is_valid(child_key) {
                 // Check bottom update as a node
-                let child_bounds = node_bounds.child_bounds_for(modified_bottom_sectant);
+                let child_bounds = node_bounds.child_bounds_for(*modified_bottom_sectant);
 
                 // Add child node into the stack
                 node_stack.push((
@@ -368,7 +369,7 @@ impl<
                 );
                 node_stack.pop();
             } else {
-                node_stack.last_mut().unwrap().1 = modified_bottom_sectant;
+                node_stack.last_mut().unwrap().1 = *modified_bottom_sectant;
 
                 // Check bottom update as leaf
                 self.post_process_node_insert(
@@ -410,6 +411,12 @@ impl<
             node_stack.pop();
             bounds_stack.pop();
         }
+
+        // Call update trigger for insertion
+        for trigger in self.update_triggers.iter() {
+            trigger(node_stack_clone.clone(), modified_bottom_sectants.clone());
+        }
+
         Ok(())
     }
 

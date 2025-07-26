@@ -40,6 +40,7 @@ impl UploadQueueTargets {
             .expect("Expected to be able to clear brick ownersip entries")
             .clear();
         self.node_key_vs_meta_index.clear();
+        self.node_index_vs_parent.clear();
         self.nodes_to_see
             .write()
             .expect("Expected to be able to reset list of nodes in view!")
@@ -109,9 +110,10 @@ pub(crate) fn rebuild<
     let max_mip_level = (tree.boxtree_size as f32 / tree.brick_dim as f32)
         .log(4.)
         .ceil() as u32;
-    let deepest_mip_level_to_upload = ((viewport_bl_ - viewport_bl).length() / view_distance)
-        .ceil()
-        .min(max_mip_level as f32) as u32;
+    let deepest_mip_level_to_upload = (((viewport_bl_ - viewport_bl).length() / view_distance)
+        .ceil() as u32)
+        .min(max_mip_level)
+        .max(1);
 
     // Look for the smallest node covering the entirety of the viewing distance
     let mut center_node_parent = None;
@@ -283,7 +285,7 @@ pub(crate) fn process<
     view: &mut BoxTreeGPUView,
     mut upload_queue_update: Option<ResMut<UploadQueueUpdateTask>>,
 ) -> Vec<CacheUpdatePackage<'a>> {
-    let mut updates = vec![];
+    let mut cache_updates = vec![];
     let view_distance = view.spyglass.viewport.frustum.z;
 
     if view.reload {
@@ -326,11 +328,11 @@ pub(crate) fn process<
                 .added_node
                 .expect("Expected update package to contain an added node")
         );
-        updates.push(new_node_update);
+        cache_updates.push(new_node_update);
         let mip_update = view
             .data_handler
             .add_brick(&tree, BrickOwnedBy::NodeAsMIP(BoxTree::<T>::ROOT_NODE_KEY));
-        updates.push(mip_update);
+        cache_updates.push(mip_update);
 
         view.reload = false;
     }
@@ -338,7 +340,6 @@ pub(crate) fn process<
     // If the upload queue update task is finished apply it!
     if let Some(ref mut upload_queue_update) = upload_queue_update {
         if block_on(future::poll_once(&mut upload_queue_update.0)).is_some() {
-            // println!("Resulting Nodes to see: {:?}", population);
             commands.remove_resource::<UploadQueueUpdateTask>();
             view.data_handler.upload_state.target_node_stack = vec![(
                 BoxTree::<T>::ROOT_NODE_KEY as usize,
@@ -406,9 +407,9 @@ pub(crate) fn process<
                 if mip_update.allocation_failed {
                     // Can't fit new mip brick into buffers, need to rebuild the pipeline
                     re_evaluate_view_size(view);
-                    return updates; // voxel data still needs to be written out
+                    return cache_updates; // voxel data still needs to be written out
                 }
-                updates.push(mip_update);
+                cache_updates.push(mip_update);
             } else {
                 // Upload Selected Node to GPU
                 let new_node_update = data_handler.add_node(&tree, parent_key, target_sectant);
@@ -416,9 +417,9 @@ pub(crate) fn process<
                 if new_node_update.allocation_failed {
                     // Can't fit new brick into buffers, need to rebuild the pipeline
                     re_evaluate_view_size(view);
-                    return updates; // voxel data still needs to be written out
+                    return cache_updates; // voxel data still needs to be written out
                 }
-                updates.push(new_node_update);
+                cache_updates.push(new_node_update);
 
                 // Upload MIP to GPU
                 let mip_update =
@@ -427,9 +428,9 @@ pub(crate) fn process<
                 if mip_update.allocation_failed {
                     // Can't fit new MIP brick into buffers, need to rebuild the pipeline
                     re_evaluate_view_size(view);
-                    return updates; // voxel data still needs to be written out
+                    return cache_updates; // voxel data still needs to be written out
                 }
-                updates.push(mip_update);
+                cache_updates.push(mip_update);
             }
 
             // Push the children into the brick upload list
@@ -453,21 +454,23 @@ pub(crate) fn process<
         }
     }
 
-    // upload bricks from the list
-    if 0 == data_handler.upload_state.bricks_to_upload.len() {
-        return updates; // node data still needs to be written out
-    }
-    let brick_requests = data_handler
-        .upload_state
-        .bricks_to_upload
-        .drain(
-            (data_handler
-                .upload_state
-                .bricks_to_upload
-                .len()
-                .saturating_sub(data_handler.brick_uploads_per_frame))..,
-        )
-        .collect::<Vec<_>>();
+    // upload bricks from the upload list if there is any
+    let data_handler = &mut view.data_handler;
+    let brick_requests = if 0 == data_handler.upload_state.bricks_to_upload.len() {
+        vec![]
+    } else {
+        data_handler
+            .upload_state
+            .bricks_to_upload
+            .drain(
+                (data_handler
+                    .upload_state
+                    .bricks_to_upload
+                    .len()
+                    .saturating_sub(data_handler.brick_uploads_per_frame))..,
+            )
+            .collect::<Vec<_>>()
+    };
     for brick_request in brick_requests {
         if data_handler
             .upload_targets
@@ -480,15 +483,15 @@ pub(crate) fn process<
         }
 
         let brick_update = data_handler.add_brick(&tree, brick_request.clone());
-
         if brick_update.allocation_failed {
             // Can't fit new brick brick into buffers, need to rebuild the pipeline
             re_evaluate_view_size(view);
-            return updates; // voxel data still needs to be written out
+            return cache_updates; // voxel data still needs to be written out
         }
-        updates.push(brick_update);
+        cache_updates.push(brick_update);
     }
-    updates
+
+    cache_updates
 }
 
 fn process_node_children<
@@ -607,7 +610,6 @@ fn next_valid_node<
     node_stack: &mut Vec<(usize, u8, Cube)>,
     nodes_to_see: &HashSet<usize>,
 ) -> Option<(usize, u8, usize, Cube)> {
-    // println!("==================================");
     let Some((current_node_key, mut target_sectant, current_node_bounds)) =
         node_stack.last().cloned()
     else {
@@ -674,9 +676,6 @@ fn next_valid_node<
                 if (target_sectant as usize) < BOX_NODE_CHILDREN_COUNT {
                     child_key = tree.nodes.get(current_node_key).child(target_sectant);
                 }
-                // println!("----");
-                // println!("target_sectant: {target_sectant}");
-                // println!("child_key: {child_key}");
             }
             node_stack.last_mut().unwrap().1 = target_sectant;
             return Some((

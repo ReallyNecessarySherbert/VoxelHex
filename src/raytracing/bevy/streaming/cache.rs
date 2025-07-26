@@ -84,17 +84,18 @@ impl BoxTreeGPUDataHandler {
     //   ░░░░░░░░░  ░░░░░   ░░░░░ ░░░░░ ░░░░░░░░░░░ ░░░░░░░░░░
     //##############################################################################
     /// Erases the child node pointed by the given victim pointer
-    /// returns with vector of keys to nodes modified
+    /// returns with vector of keys to nodes modified and the modified children
+    /// inside a bitmask where each bit set matches the corresponding child modified
     fn erase_node_child<T>(
         &mut self,
         meta_index: usize,
         child_sectant: usize,
         tree: &BoxTree<T>,
-    ) -> Vec<usize>
+    ) -> Vec<(usize, u64)>
     where
         T: Default + Clone + Eq + VoxelData + Hash,
     {
-        let mut modified_nodes = vec![meta_index];
+        let mut modified_nodes = vec![(meta_index, 0x01 << child_sectant)];
         debug_assert!(
             self.upload_targets
                 .node_key_vs_meta_index
@@ -117,6 +118,7 @@ impl BoxTreeGPUDataHandler {
         let parent_first_child_index = meta_index * BOX_NODE_CHILDREN_COUNT;
         let parent_children_offset = parent_first_child_index + child_sectant;
         let child_descriptor = self.render_data.node_children[parent_children_offset] as usize;
+
         debug_assert_ne!(
             child_descriptor,
             empty_marker::<u32>() as usize,
@@ -169,7 +171,7 @@ impl BoxTreeGPUDataHandler {
                             .remove_by_left(&(child_mip as usize));
                     }
                 }
-                modified_nodes.push(child_descriptor);
+                modified_nodes.push((child_descriptor, 0));
             }
             NodeContent::UniformLeaf(_) | NodeContent::Leaf(_) => {
                 let brick_index = child_descriptor & 0x7FFFFFFF;
@@ -281,35 +283,38 @@ impl BoxTreeGPUDataHandler {
         } else {
             BoxTree::<T>::ROOT_NODE_KEY as usize
         };
-        debug_assert!(
-            !self
+
+        let mut modifications = CacheUpdatePackage {
+            allocation_failed: false,
+            added_node: None,
+            brick_updates: vec![],
+            modified_nodes: vec![],
+        };
+
+        // Determine the new node index in meta
+        let (node_index, robbed_parent) = if BoxTree::<T>::ROOT_NODE_KEY == node_key as u32 {
+            if !self
                 .upload_targets
                 .node_key_vs_meta_index
                 .contains_left(&node_key)
-                || BoxTree::<T>::ROOT_NODE_KEY == node_key as u32,
-            "Trying to add already available node twice!"
-        );
-        // Determine the new node index in meta
-        let mut modifications;
-        let (node_index, robbed_parent) = if BoxTree::<T>::ROOT_NODE_KEY == node_key as u32 {
-            modifications = CacheUpdatePackage {
-                allocation_failed: false,
-                added_node: Some(0),
-                brick_update: None,
-                modified_nodes: vec![],
-            };
+            {
+                modifications.added_node = Some(0);
+            }
             (0, None)
         } else {
-            let Some((node_index, robbed_parent)) = self.first_available_node() else {
-                return CacheUpdatePackage::allocation_failed();
-            };
-            modifications = CacheUpdatePackage {
-                allocation_failed: false,
-                added_node: Some(node_index),
-                brick_update: None,
-                modified_nodes: vec![],
-            };
-            (node_index, robbed_parent)
+            if let Some(existing_node) = self
+                .upload_targets
+                .node_key_vs_meta_index
+                .get_by_left(&node_key)
+            {
+                (*existing_node, None)
+            } else {
+                let Some((node_index, robbed_parent)) = self.first_available_node() else {
+                    return CacheUpdatePackage::allocation_failed();
+                };
+                modifications.added_node = Some(node_index);
+                (node_index, robbed_parent)
+            }
         };
 
         let robbed_node_key_in_meta = self
@@ -343,12 +348,17 @@ impl BoxTreeGPUDataHandler {
                     [robbed_parent.0 * BOX_NODE_CHILDREN_COUNT + robbed_parent.1 as usize])
                     as usize,
                 node_index,
-                "Expected child[{:?}] of node[{:?}] to be node[{:?}] instead of {:?}*!",
+                "Expected child[{:?}] of meta[{:?}] to be meta[{:?}] instead of {:?}*(corresponding node_key: {:?})!",
                 robbed_parent.1,
                 robbed_parent.0,
                 node_index,
                 self.render_data.node_children
-                    [robbed_parent.0 * BOX_NODE_CHILDREN_COUNT + robbed_parent.1 as usize]
+                    [robbed_parent.0 * BOX_NODE_CHILDREN_COUNT + robbed_parent.1 as usize],
+                self
+                    .upload_targets
+                    .node_key_vs_meta_index
+                    .get_by_right(&(self.render_data.node_children
+                        [robbed_parent.0 * BOX_NODE_CHILDREN_COUNT + robbed_parent.1 as usize] as usize))
             );
             modifications
                 .modified_nodes
@@ -357,9 +367,7 @@ impl BoxTreeGPUDataHandler {
                     robbed_parent.1 as usize,
                     tree,
                 ));
-        } else {
-            modifications.modified_nodes.push(node_index);
-        };
+        }
 
         // Inject Node properties to render data
         Self::inject_node_properties(
@@ -401,17 +409,21 @@ impl BoxTreeGPUDataHandler {
             self.upload_targets
                 .node_index_vs_parent
                 .insert(node_index, (*parent_meta_index, target_sectant));
-            modifications.modified_nodes.push(*parent_meta_index);
+            modifications
+                .modified_nodes
+                .push((*parent_meta_index, 0x01 << target_sectant));
         }
 
         // Add child nodes of new child if any is available
+        modifications.modified_nodes.push((node_index, u64::MAX)); // Need to re-evaluate all children,
+                                                                   // some might be deleted,
+                                                                   // some might be available
         let parent_first_child_index = node_index * BOX_NODE_CHILDREN_COUNT;
         match &tree.nodes.get(node_key).content {
             NodeContent::Nothing => {}
             NodeContent::Internal => {
                 for sectant in 0..BOX_NODE_CHILDREN_COUNT {
-                    let child_key = tree.nodes.get(node_key).child(sectant as u8);
-                    if child_key != empty_marker::<u32>() as usize {
+                    if let Some(child_key) = tree.valid_child_for(node_key, sectant as u8) {
                         self.render_data.node_children[parent_first_child_index + sectant] = *self
                             .upload_targets
                             .node_key_vs_meta_index
@@ -425,52 +437,69 @@ impl BoxTreeGPUDataHandler {
                 }
             }
             NodeContent::UniformLeaf(brick) => {
-                if let BrickData::Solid(voxel) = brick {
-                    self.render_data.node_children[parent_first_child_index] = 0x80000000 | *voxel;
-                } else {
-                    let node_entry = BrickOwnedBy::NodeAsChild(node_key as u32, 0, V3c::default());
-                    let brick_ownership_entry = self
-                        .upload_targets
-                        .brick_ownership
-                        .read()
-                        .expect("Expected to be able to read brick ownership entries")
-                        .get_by_right(&node_entry)
-                        .cloned();
-                    if let Some(brick_index) = brick_ownership_entry {
+                match brick {
+                    BrickData::Solid(voxel) => {
                         self.render_data.node_children[parent_first_child_index] =
-                            0x7FFFFFFF & brick_index as u32;
-                    } else {
+                            0x80000000 | *voxel;
+                    }
+                    BrickData::Empty => {
                         self.render_data.node_children[parent_first_child_index] =
                             empty_marker::<u32>();
                     }
-                }
-            }
-            NodeContent::Leaf(bricks) => {
-                for (sectant, brick) in bricks.iter().enumerate().take(BOX_NODE_CHILDREN_COUNT) {
-                    if let BrickData::Solid(voxel) = brick {
-                        self.render_data.node_children[parent_first_child_index + sectant] =
-                            0x80000000 | voxel;
-                    } else {
-                        let node_entry = BrickOwnedBy::NodeAsChild(
-                            node_key as u32,
-                            sectant as u8,
-                            V3c::default(),
-                        );
+                    BrickData::Parted(_brick) => {
                         let brick_ownership_entry = self
                             .upload_targets
                             .brick_ownership
                             .read()
                             .expect("Expected to be able to read brick ownership entries")
-                            .get_by_right(&node_entry)
+                            .get_by_right(&BrickOwnedBy::NodeAsChild(
+                                node_key as u32,
+                                0,
+                                V3c::default(),
+                            ))
                             .cloned();
                         if let Some(brick_index) = brick_ownership_entry {
-                            self.render_data.node_children[parent_first_child_index + sectant] =
+                            self.render_data.node_children[parent_first_child_index] =
                                 0x7FFFFFFF & brick_index as u32;
                         } else {
-                            self.render_data.node_children[parent_first_child_index + sectant] =
+                            self.render_data.node_children[parent_first_child_index] =
                                 empty_marker::<u32>();
                         }
                     }
+                };
+            }
+            NodeContent::Leaf(bricks) => {
+                for (sectant, brick) in bricks.iter().enumerate().take(BOX_NODE_CHILDREN_COUNT) {
+                    match brick {
+                        BrickData::Solid(voxel) => {
+                            self.render_data.node_children[parent_first_child_index + sectant] =
+                                0x80000000 | voxel;
+                        }
+                        BrickData::Empty => {
+                            self.render_data.node_children[parent_first_child_index + sectant] =
+                                empty_marker::<u32>();
+                        }
+                        BrickData::Parted(_brick) => {
+                            if let Some(brick_index) = self
+                                .upload_targets
+                                .brick_ownership
+                                .read()
+                                .expect("Expected to be able to read brick ownership entries")
+                                .get_by_right(&BrickOwnedBy::NodeAsChild(
+                                    node_key as u32,
+                                    sectant as u8,
+                                    V3c::default(),
+                                ))
+                            {
+                                self.render_data.node_children
+                                    [parent_first_child_index + sectant] =
+                                    0x7FFFFFFF & *brick_index as u32;
+                            } else {
+                                self.render_data.node_children
+                                    [parent_first_child_index + sectant] = empty_marker::<u32>();
+                            }
+                        }
+                    };
                 }
             }
         }
@@ -736,7 +765,7 @@ impl BoxTreeGPUDataHandler {
                                 .get_by_left(&(key as usize))
                                 .unwrap();
                             self.render_data.node_mips[robbed_meta_index] = empty_marker();
-                            vec![robbed_meta_index]
+                            vec![(robbed_meta_index, 0)]
                         } else {
                             Vec::new()
                         }
@@ -756,14 +785,14 @@ impl BoxTreeGPUDataHandler {
                     .node_key_vs_meta_index
                     .get_by_left(&parent_node_key)
                     .unwrap();
-                modified_nodes.push(*parent_meta_index);
-
                 if target_sectant < BOX_NODE_CHILDREN_COUNT {
+                    modified_nodes.push((*parent_meta_index, 0x01 << target_sectant));
                     let parent_child_index =
                         (parent_meta_index * BOX_NODE_CHILDREN_COUNT) + target_sectant;
                     self.render_data.node_children[parent_child_index] =
                         0x7FFFFFFF & brick_index as u32;
                 } else {
+                    modified_nodes.push((*parent_meta_index, 0));
                     self.render_data.node_mips[*parent_meta_index] =
                         0x7FFFFFFF & brick_index as u32;
                 }
@@ -780,13 +809,14 @@ impl BoxTreeGPUDataHandler {
                     brick.len(),
                     "Expected Brick slice to align to tree brick dimension"
                 );
+
                 CacheUpdatePackage {
                     allocation_failed: false,
                     added_node: None,
-                    brick_update: Some(BrickUpdate {
+                    brick_updates: vec![BrickUpdate {
                         brick_index,
                         data: &brick[..],
-                    }),
+                    }],
                     modified_nodes,
                 }
             }

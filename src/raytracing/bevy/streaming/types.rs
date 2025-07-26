@@ -11,7 +11,7 @@ use std::{
 };
 
 /// Brick ownership, complete with brick position where relevant
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Eq)]
 pub(crate) enum BrickOwnedBy {
     None,
     NodeAsChild(u32, u8, V3c<u32>),
@@ -42,10 +42,12 @@ pub(crate) struct CacheUpdatePackage<'a> {
     pub(crate) added_node: Option<usize>,
 
     /// The bricks updated during the request
-    pub(crate) brick_update: Option<BrickUpdate<'a>>,
+    pub(crate) brick_updates: Vec<BrickUpdate<'a>>,
 
-    /// The list of nodes with modified connections during the operation
-    pub(crate) modified_nodes: Vec<usize>,
+    /// The list of modified nodes during the operation
+    /// with updated child connections for each node in a bitstring
+    /// where each bit set matches the correcponding child
+    pub(crate) modified_nodes: Vec<(usize, u64)>,
 }
 
 /// Information about the bricks and nodes available on the GPU
@@ -119,4 +121,19 @@ pub struct BoxTreeGPUDataHandler {
 
     /// Center and viewing distance of the viewport that needs to be set
     pub(crate) pending_upload_queue_update: Option<(V3cf32, f32)>,
+}
+
+#[cfg(test)]
+mod streaming_type_tests {
+    use std::hash::{DefaultHasher, Hash};
+
+    use crate::{boxtree::V3c, raytracing::bevy::streaming::BrickOwnedBy};
+
+    #[test]
+    fn test_brick_ownership_hash() {
+        assert_eq!(
+            BrickOwnedBy::NodeAsChild(5, 6, V3c::new(5, 5, 5)).hash(&mut DefaultHasher::new()),
+            BrickOwnedBy::NodeAsChild(5, 6, V3c::new(0, 0, 0)).hash(&mut DefaultHasher::new())
+        )
+    }
 }

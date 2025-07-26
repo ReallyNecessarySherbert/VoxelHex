@@ -28,6 +28,7 @@ use bevy::{
     tasks::AsyncComputeTaskPool,
 };
 use std::{
+    collections::VecDeque,
     hash::Hash,
     sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard, TryLockResult},
 };
@@ -199,9 +200,20 @@ impl<
         #[cfg(all(not(feature = "bytecode"), not(feature = "serialization")))] T: Default + Eq + Clone + Hash + VoxelData + Send + Sync + 'static,
     > BoxTreeGPUHost<T>
 {
-    pub fn new(tree: BoxTree<T>) -> Self {
+    pub fn new(mut tree: BoxTree<T>) -> Self {
+        let changes_buffer: Arc<RwLock<VecDeque<(Vec<(usize, u8)>, Vec<u8>)>>> = Arc::default();
+        let changes_arc = changes_buffer.clone();
+        tree.update_triggers.push(Arc::new(
+            move |node_stack: Vec<(usize, u8)>, updated_sectants: Vec<u8>| {
+                changes_arc
+                    .write()
+                    .expect("Expected to be able to update BoxTree changes buffer")
+                    .push_back((node_stack, updated_sectants));
+            },
+        ));
         BoxTreeGPUHost {
             tree: Arc::new(RwLock::new(tree)),
+            changes_buffer,
         }
     }
 }

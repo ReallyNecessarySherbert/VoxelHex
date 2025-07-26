@@ -1,5 +1,5 @@
 use crate::{boxtree::BOX_NODE_CHILDREN_COUNT, object_pool::ObjectPool};
-use std::{collections::HashMap, error::Error, hash::Hash};
+use std::{collections::HashMap, error::Error, hash::Hash, sync::Arc};
 
 #[cfg(feature = "serialization")]
 use serde::{Deserialize, Serialize};
@@ -190,6 +190,10 @@ pub(crate) struct NodeData {
     pub(crate) occlusion_bits: u8,
 }
 
+/// A function being called when the data in the tree is being updated
+/// Fn(node_access_stack: Vec<(usize, u8)>, updated_sectants: Vec<u8>)
+pub type BoxTreeUpdatedSignal = Arc<dyn Fn(Vec<(usize, u8)>, Vec<u8>) + Send + Sync>;
+
 /// Sparse 64Tree of Voxel Bricks, where each leaf node contains a brick of voxels.
 /// A Brick is a 3 dimensional matrix, each element of it containing a voxel.
 /// A Brick can be indexed directly, as opposed to the boxtree which is essentially a
@@ -200,6 +204,9 @@ pub struct BoxTree<T = u32>
 where
     T: Default + Clone + Eq + Hash,
 {
+    /// Feature flag to enable/disable simplification attempts during boxtree update operations
+    pub auto_simplify: bool,
+
     /// Size of one brick in a leaf node (dim^3)
     pub(crate) brick_dim: u32,
 
@@ -226,9 +233,9 @@ where
     #[cfg_attr(feature = "serialization", serde(skip_serializing, skip_deserializing))]
     pub(crate) map_to_data_index_in_palette: HashMap<T, usize>,
 
-    /// Feature flag to enable/disable simplification attempts during boxtree update operations
-    pub auto_simplify: bool,
-
     /// The stored MIP map strategy
     pub(crate) mip_map_strategy: MIPMapStrategy,
+
+    /// The signals to be called whenever the tree is updated
+    pub(crate) update_triggers: Vec<BoxTreeUpdatedSignal>,
 }

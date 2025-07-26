@@ -266,15 +266,19 @@ impl<
         }
 
         // post-processing operations
+        let node_stack_clone = node_stack.clone();
         let mut simplifyable = self.auto_simplify; // Don't even start to simplify if it's disabled
-        for modified_bottom_sectant in modified_bottom_sectants {
-            let (node_key, original_sectant) = node_stack.last().cloned().unwrap();
-            let node_bounds = bounds_stack.last().unwrap();
-            let child_key = self.nodes.get(node_key).child(modified_bottom_sectant);
+        let (bottom_node_key, original_sectant) = node_stack.last().cloned().unwrap();
+        let node_bounds = bounds_stack.last().unwrap();
+        for modified_bottom_sectant in &modified_bottom_sectants {
+            let child_key = self
+                .nodes
+                .get(bottom_node_key)
+                .child(*modified_bottom_sectant);
 
             if self.nodes.key_is_valid(child_key) {
                 // Check bottom update as a node
-                let child_bounds = node_bounds.child_bounds_for(modified_bottom_sectant);
+                let child_bounds = node_bounds.child_bounds_for(*modified_bottom_sectant);
 
                 // Add child node into the stack
                 node_stack.push((
@@ -295,7 +299,7 @@ impl<
                 );
                 node_stack.pop();
             } else {
-                node_stack.last_mut().unwrap().1 = modified_bottom_sectant;
+                node_stack.last_mut().unwrap().1 = *modified_bottom_sectant;
 
                 // Check bottom update as leaf
                 self.post_process_node_clear(
@@ -336,6 +340,16 @@ impl<
 
             node_stack.pop();
             bounds_stack.pop();
+        }
+
+        // Call update trigger for data updates
+        let mut every_updated_bottom_sectant = erased_whole_sectants.clone();
+        every_updated_bottom_sectant.append(&mut modified_bottom_sectants);
+        for trigger in self.update_triggers.iter() {
+            trigger(
+                node_stack_clone.clone(),
+                every_updated_bottom_sectant.clone(),
+            );
         }
 
         Ok(())
