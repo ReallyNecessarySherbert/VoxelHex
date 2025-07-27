@@ -16,12 +16,11 @@ use crate::{
     },
     spatial::Cube,
 };
-use bendy::{decoding::FromBencode, encoding::ToBencode};
 use bevy::{
+    math::{Mat4, Vec3},
     prelude::{Assets, Handle, Image, Res, ResMut, Vec4},
     render::{
-        render_asset::RenderAssetUsages,
-        render_asset::RenderAssets,
+        render_asset::{RenderAssetUsages, RenderAssets},
         render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages},
         texture::GpuImage,
     },
@@ -29,37 +28,10 @@ use bevy::{
 use bimap::BiHashMap;
 use std::{
     collections::HashMap,
-    hash::Hash,
     sync::{Arc, RwLock},
 };
 
-impl<
-        #[cfg(all(feature = "bytecode", feature = "serialization"))] T: FromBencode
-            + ToBencode
-            + Serialize
-            + DeserializeOwned
-            + Default
-            + Eq
-            + Clone
-            + Hash
-            + VoxelData
-            + Send
-            + Sync
-            + 'static,
-        #[cfg(all(feature = "bytecode", not(feature = "serialization")))] T: FromBencode + ToBencode + Default + Eq + Clone + Hash + VoxelData + Send + Sync + 'static,
-        #[cfg(all(not(feature = "bytecode"), feature = "serialization"))] T: Serialize
-            + DeserializeOwned
-            + Default
-            + Eq
-            + Clone
-            + Hash
-            + VoxelData
-            + Send
-            + Sync
-            + 'static,
-        #[cfg(all(not(feature = "bytecode"), not(feature = "serialization")))] T: Default + Eq + Clone + Hash + VoxelData + Send + Sync + 'static,
-    > BoxTreeGPUHost<T>
-{
+impl<T: VoxelData> BoxTreeGPUHost<T> {
     /// Creates GPU compatible data renderable on the GPU from an BoxTree
     pub fn create_new_view(
         &mut self,
@@ -228,7 +200,42 @@ impl Viewport {
             direction,
             frustum,
             fov,
+            // these will be updated later when the resolution is known
+            view_matrix: Mat4::IDENTITY,
+            projection_matrix: Mat4::IDENTITY,
+            inverse_view_projection_matrix: Mat4::IDENTITY,
         }
+    }
+
+    /// Updates the view and projection matrices based on current viewport parameters
+    pub fn update_matrices(&mut self, resolution: [u32; 2]) {
+        let forward = self.direction;
+        let right = forward.cross(V3c::new(0.0, 1.0, 0.0)).normalized();
+        let up = right.cross(forward).normalized();
+
+        // sorry V3c
+        let origin_vec3 = Vec3::new(self.origin.x, self.origin.y, self.origin.z);
+        let target_vec3 = Vec3::new(
+            self.origin.x + forward.x,
+            self.origin.y + forward.y,
+            self.origin.z + forward.z,
+        );
+        let up_vec3 = Vec3::new(up.x, up.y, up.z);
+
+        self.view_matrix = Mat4::look_at_rh(origin_vec3, target_vec3, up_vec3);
+
+        let aspect_ratio = resolution[0] as f32 / resolution[1] as f32;
+        let fov_radians = self.fov.to_radians();
+
+        // calculate near plane from FOV and frustum height
+        let near = (self.frustum.y / 2.0) / (fov_radians / 2.0).tan();
+        let far = self.frustum.z;
+
+        self.projection_matrix = Mat4::perspective_rh(fov_radians, aspect_ratio, near, far);
+
+        // compute inverse view projection matrix
+        let view_projection = self.projection_matrix * self.view_matrix;
+        self.inverse_view_projection_matrix = view_projection.inverse();
     }
 
     /// Provides the point the viewport originates rays from. All rays point away from this point.
@@ -242,10 +249,20 @@ impl Viewport {
         self.origin += delta;
     }
 
-    /// Sets the VIewports origin to the given position
+    /// Sets the viewports origin to the given position
     pub fn set_viewport_origin(&mut self, new_origin: V3cf32) {
         self.origin_delta += self.origin - new_origin;
         self.origin = new_origin;
+    }
+
+    /// Sets the viewport direction. The direction vector will be normalized
+    pub fn set_direction(&mut self, direction: V3cf32) {
+        self.direction = direction.normalized();
+    }
+
+    /// Sets the field of view
+    pub fn set_fov(&mut self, fov: f32) {
+        self.fov = fov;
     }
 }
 
@@ -301,9 +318,15 @@ pub(crate) fn handle_resolution_updates_main_world(mut viewset: Option<ResMut<Vh
         }
         let mut current_view = viewset.views[0].write().unwrap();
         if current_view.new_images_ready && current_view.new_resolution.is_some() {
-            current_view.resolution = current_view.new_resolution.take().unwrap();
+            let new_resolution = current_view.new_resolution.take().unwrap();
+            current_view.resolution = new_resolution;
             current_view.spyglass.output_texture = current_view.new_output_texture.clone().unwrap();
             current_view.spyglass.depth_texture = current_view.new_depth_texture.clone().unwrap();
+            // Update viewport matrices with new resolution
+            current_view
+                .spyglass
+                .viewport
+                .update_matrices(new_resolution);
         }
     }
 }
@@ -329,9 +352,12 @@ pub(crate) fn handle_resolution_updates_render_world(
                     .is_some();
 
             if view.new_images_ready && view.new_resolution.is_some() {
-                view.resolution = view.new_resolution.take().unwrap();
+                let new_resolution = view.new_resolution.take().unwrap();
+                view.resolution = new_resolution;
                 view.spyglass.output_texture = view.new_output_texture.clone().unwrap();
                 view.spyglass.depth_texture = view.new_depth_texture.clone().unwrap();
+                // Update viewport matrices with new resolution
+                view.spyglass.viewport.update_matrices(new_resolution);
             }
         }
     }

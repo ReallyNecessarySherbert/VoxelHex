@@ -19,7 +19,6 @@ use crate::{
     },
     spatial::Cube,
 };
-use bendy::{decoding::FromBencode, encoding::ToBencode};
 use bevy::{
     app::{App, Plugin},
     ecs::prelude::IntoScheduleConfigs,
@@ -32,7 +31,6 @@ use bevy::{
 };
 use std::{
     collections::VecDeque,
-    hash::Hash,
     sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard, TryLockResult},
 };
 
@@ -92,23 +90,7 @@ pub(crate) fn sync_from_main_world(
     }
 }
 
-fn handle_viewport_position_updates<
-    #[cfg(all(feature = "bytecode", feature = "serialization"))] T: FromBencode
-        + ToBencode
-        + Serialize
-        + DeserializeOwned
-        + Default
-        + Eq
-        + Clone
-        + Hash
-        + VoxelData
-        + Send
-        + Sync
-        + 'static,
-    #[cfg(all(feature = "bytecode", not(feature = "serialization")))] T: FromBencode + ToBencode + Default + Eq + Clone + Hash + VoxelData + Send + Sync + 'static,
-    #[cfg(all(not(feature = "bytecode"), feature = "serialization"))] T: Serialize + DeserializeOwned + Default + Eq + Clone + Hash + VoxelData + Send + Sync + 'static,
-    #[cfg(all(not(feature = "bytecode"), not(feature = "serialization")))] T: Default + Eq + Clone + Hash + VoxelData + Send + Sync + 'static,
->(
+fn handle_viewport_position_updates<T: VoxelData>(
     mut commands: Commands,
     mut viewset: Option<ResMut<VhxViewSet>>,
     mut tree_gpu_host: Option<Res<BoxTreeGPUHost<T>>>,
@@ -176,33 +158,7 @@ fn handle_viewport_position_updates<
     }
 }
 
-impl<
-        #[cfg(all(feature = "bytecode", feature = "serialization"))] T: FromBencode
-            + ToBencode
-            + Serialize
-            + DeserializeOwned
-            + Default
-            + Eq
-            + Clone
-            + Hash
-            + VoxelData
-            + Send
-            + Sync
-            + 'static,
-        #[cfg(all(feature = "bytecode", not(feature = "serialization")))] T: FromBencode + ToBencode + Default + Eq + Clone + Hash + VoxelData + Send + Sync + 'static,
-        #[cfg(all(not(feature = "bytecode"), feature = "serialization"))] T: Serialize
-            + DeserializeOwned
-            + Default
-            + Eq
-            + Clone
-            + Hash
-            + VoxelData
-            + Send
-            + Sync
-            + 'static,
-        #[cfg(all(not(feature = "bytecode"), not(feature = "serialization")))] T: Default + Eq + Clone + Hash + VoxelData + Send + Sync + 'static,
-    > BoxTreeGPUHost<T>
-{
+impl<T: VoxelData> BoxTreeGPUHost<T> {
     pub fn new(mut tree: BoxTree<T>) -> Self {
         let changes_buffer: Arc<RwLock<VecDeque<BoxTreeUpdatedSignalParams>>> = Arc::default();
         let changes_arc = changes_buffer.clone();
@@ -342,33 +298,7 @@ where
     }
 }
 
-impl<
-        #[cfg(all(feature = "bytecode", feature = "serialization"))] T: FromBencode
-            + ToBencode
-            + Serialize
-            + DeserializeOwned
-            + Default
-            + Eq
-            + Clone
-            + Hash
-            + VoxelData
-            + Send
-            + Sync
-            + 'static,
-        #[cfg(all(feature = "bytecode", not(feature = "serialization")))] T: FromBencode + ToBencode + Default + Eq + Clone + Hash + VoxelData + Send + Sync + 'static,
-        #[cfg(all(not(feature = "bytecode"), feature = "serialization"))] T: Serialize
-            + DeserializeOwned
-            + Default
-            + Eq
-            + Clone
-            + Hash
-            + VoxelData
-            + Send
-            + Sync
-            + 'static,
-        #[cfg(all(not(feature = "bytecode"), not(feature = "serialization")))] T: Default + Eq + Clone + Hash + VoxelData + Send + Sync + 'static,
-    > Plugin for RenderBevyPlugin<T>
-{
+impl<T: VoxelData> Plugin for RenderBevyPlugin<T> {
     fn build(&self, app: &mut App) {
         app.add_plugins((ExtractResourcePlugin::<BoxTreeGPUHost<T>>::default(),));
         app.add_systems(

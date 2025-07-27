@@ -14,7 +14,6 @@ use crate::{
     },
     spatial::Cube,
 };
-use bendy::{decoding::FromBencode, encoding::ToBencode};
 use bevy::{
     prelude::{Commands, Res, ResMut},
     render::{
@@ -31,24 +30,7 @@ use std::{
 };
 
 /// Process updates made to the Boxtree inside the given tree host
-pub(crate) fn handle_tree_updates<
-    'a,
-    #[cfg(all(feature = "bytecode", feature = "serialization"))] T: FromBencode
-        + ToBencode
-        + Serialize
-        + DeserializeOwned
-        + Default
-        + Eq
-        + Clone
-        + Hash
-        + VoxelData
-        + Send
-        + Sync
-        + 'static,
-    #[cfg(all(feature = "bytecode", not(feature = "serialization")))] T: FromBencode + ToBencode + Default + Eq + Clone + Hash + VoxelData + Send + Sync + 'static,
-    #[cfg(all(not(feature = "bytecode"), feature = "serialization"))] T: Serialize + DeserializeOwned + Default + Eq + Clone + Hash + VoxelData + Send + Sync + 'static,
-    #[cfg(all(not(feature = "bytecode"), not(feature = "serialization")))] T: Default + Eq + Clone + Hash + VoxelData + Send + Sync + 'static,
->(
+pub(crate) fn handle_tree_updates<'a, T: VoxelData>(
     tree: &'a BoxTree<T>,
     tree_host: &'a BoxTreeGPUHost<T>,
     view: &mut BoxTreeGPUView,
@@ -294,22 +276,7 @@ pub(crate) fn handle_tree_updates<
     cache_updates
 }
 
-pub(crate) fn boxtree_properties<
-    #[cfg(all(feature = "bytecode", feature = "serialization"))] T: FromBencode
-        + ToBencode
-        + Serialize
-        + DeserializeOwned
-        + Default
-        + Eq
-        + Clone
-        + Hash
-        + VoxelData,
-    #[cfg(all(feature = "bytecode", not(feature = "serialization")))] T: Default + Eq + Clone + Hash + VoxelData,
-    #[cfg(all(not(feature = "bytecode"), feature = "serialization"))] T: Serialize + DeserializeOwned + Default + Eq + Clone + Hash + VoxelData,
-    #[cfg(all(not(feature = "bytecode"), not(feature = "serialization")))] T: Default + Eq + Clone + Hash + VoxelData,
->(
-    tree: &BoxTree<T>,
-) -> u32 {
+pub(crate) fn boxtree_properties<T: VoxelData>(tree: &BoxTree<T>) -> u32 {
     (tree.brick_dim & 0x0000FFFF) | ((tree.mip_map_strategy.is_enabled() as u32) << 16)
 }
 
@@ -443,23 +410,7 @@ impl CacheUpdatePackage<'_> {
 }
 
 /// Continually upload node and brick data to GPU
-pub(crate) fn upload<
-    #[cfg(all(feature = "bytecode", feature = "serialization"))] T: FromBencode
-        + ToBencode
-        + Serialize
-        + DeserializeOwned
-        + Default
-        + Eq
-        + Clone
-        + Hash
-        + VoxelData
-        + Send
-        + Sync
-        + 'static,
-    #[cfg(all(feature = "bytecode", not(feature = "serialization")))] T: FromBencode + ToBencode + Default + Eq + Clone + Hash + VoxelData + Send + Sync + 'static,
-    #[cfg(all(not(feature = "bytecode"), feature = "serialization"))] T: Serialize + DeserializeOwned + Default + Eq + Clone + Hash + VoxelData + Send + Sync + 'static,
-    #[cfg(all(not(feature = "bytecode"), not(feature = "serialization")))] T: Default + Eq + Clone + Hash + VoxelData + Send + Sync + 'static,
->(
+pub(crate) fn upload<T: VoxelData>(
     mut commands: Commands,
     mut viewset: Option<ResMut<VhxViewSet>>,
     tree_gpu_host: Option<Res<BoxTreeGPUHost<T>>>,
@@ -523,8 +474,10 @@ pub(crate) fn upload<
     if view.spyglass.viewport_changed {
         view.spyglass.viewport_changed = false;
 
+        let resolution = view.resolution;
         let mut buffer = UniformBuffer::new(Vec::<u8>::new());
         buffer.write(&view.spyglass.viewport).unwrap();
+        view.spyglass.viewport.update_matrices(resolution);
         render_queue.write_buffer(
             &view.resources.as_ref().unwrap().viewport_buffer,
             0,

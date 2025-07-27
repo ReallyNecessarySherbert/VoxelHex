@@ -10,11 +10,9 @@ use crate::{
         Cube,
     },
 };
-use bendy::{decoding::FromBencode, encoding::ToBencode};
-use std::hash::Hash;
 
 #[cfg(debug_assertions)]
-use crate::spatial::math::FLOAT_ERROR_TOLERANCE;
+use crate::spatial::math::VOXEL_EPSILON;
 
 #[derive(Debug)]
 pub(crate) struct NodeStack<T, const SIZE: usize = 4> {
@@ -77,21 +75,7 @@ where
     }
 }
 
-impl<
-        #[cfg(all(feature = "bytecode", feature = "serialization"))] T: FromBencode
-            + ToBencode
-            + Serialize
-            + DeserializeOwned
-            + Default
-            + Eq
-            + Clone
-            + Hash
-            + VoxelData,
-        #[cfg(all(feature = "bytecode", not(feature = "serialization")))] T: FromBencode + ToBencode + Default + Eq + Clone + Hash + VoxelData,
-        #[cfg(all(not(feature = "bytecode"), feature = "serialization"))] T: Serialize + DeserializeOwned + Default + Eq + Clone + Hash + VoxelData,
-        #[cfg(all(not(feature = "bytecode"), not(feature = "serialization")))] T: Default + Eq + Clone + Hash + VoxelData,
-    > BoxTree<T>
-{
+impl<T: VoxelData> BoxTree<T> {
     pub(crate) fn get_dda_scale_factors(ray: &Ray) -> V3c<f32> {
         V3c::new(
             (1. + (ray.direction.z / ray.direction.x).powf(2.)
@@ -236,12 +220,12 @@ impl<
                 // Check if the resulting point is inside bounds still
                 let relative_point = *ray_current_point - current_bounds.min_position;
                 debug_assert!(
-                    (relative_point.x < FLOAT_ERROR_TOLERANCE
-                        || (relative_point.x - current_bounds.size) < FLOAT_ERROR_TOLERANCE)
-                        || (relative_point.y < FLOAT_ERROR_TOLERANCE
-                            || (relative_point.y - current_bounds.size) < FLOAT_ERROR_TOLERANCE)
-                        || (relative_point.z < FLOAT_ERROR_TOLERANCE
-                            || (relative_point.z - current_bounds.size) < FLOAT_ERROR_TOLERANCE)
+                    (relative_point.x < VOXEL_EPSILON
+                        || (relative_point.x - current_bounds.size) < VOXEL_EPSILON)
+                        || (relative_point.y < VOXEL_EPSILON
+                            || (relative_point.y - current_bounds.size) < VOXEL_EPSILON)
+                        || (relative_point.z < VOXEL_EPSILON
+                            || (relative_point.z - current_bounds.size) < VOXEL_EPSILON)
                 );
             }
         }
@@ -256,7 +240,7 @@ impl<
         brick: &BrickData<PaletteIndexValues>,
         brick_bounds: &Cube,
         ray_scale_factors: &V3c<f32>,
-    ) -> Option<(BoxTreeEntry<T>, V3c<f32>, V3c<f32>)> {
+    ) -> Option<(BoxTreeEntry<'_, T>, V3c<f32>, V3c<f32>)> {
         match brick {
             BrickData::Empty => {
                 // No need to do anything, iteration continues with "leaf miss"
@@ -309,7 +293,7 @@ impl<
 
     /// Provides the collision point of the given ray with the contained voxel field,
     /// Returns a reference of the contained data, collision point and normal at impact, if any
-    pub fn get_by_ray(&self, ray: &Ray) -> Option<(BoxTreeEntry<T>, V3c<f32>, V3c<f32>)> {
+    pub fn get_by_ray(&self, ray: &Ray) -> Option<(BoxTreeEntry<'_, T>, V3c<f32>, V3c<f32>)> {
         // Pre-calculated optimization variables
         let ray_scale_factors = Self::get_dda_scale_factors(ray);
         let direction_lut_index = hash_direction(&ray.direction) as usize;

@@ -9,7 +9,6 @@ pub mod boxtree;
 /// Serialization/deserialization
 #[cfg(any(
     feature = "bytecode",
-    feature = "serialization",
     feature = "dot_vox_support"
 ))]
 pub mod convert;

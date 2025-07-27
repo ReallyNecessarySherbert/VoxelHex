@@ -1,10 +1,6 @@
 use std::vec::Vec;
 
-#[cfg(feature = "serialization")]
-use serde::{Deserialize, Serialize};
-
 /// One item in a datapool with a used flag
-#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
 #[derive(Clone)]
 struct ReusableItem<T> {
     reserved: bool,
@@ -87,7 +83,6 @@ where
 /// Stores re-usable objects to eliminate data allocation overhead when inserting and removing Nodes
 /// It keeps track of different buffers for different levels in the graph, allocating more space initially to lower levels
 #[derive(Default, Clone)]
-#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
 pub(crate) struct ObjectPool<T> {
     buffer: Vec<ReusableItem<T>>, // Pool of objects to be reused
     first_available: usize,       // the index of the first available item

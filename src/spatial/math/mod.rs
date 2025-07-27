@@ -25,7 +25,6 @@ pub(crate) const fn flat_projection(x: usize, y: usize, z: usize, size: usize) -
 /// * `offset` - From range 0..size in each dimensions
 /// * `size` - Size of the region to check for child sectants
 pub(crate) fn offset_sectant(offset: &V3c<f32>, size: f32) -> u8 {
-    // Scale to 0..BOX_NODE_CHILDREN_COUNT, then project to an unique index
     debug_assert!(
         offset.x <= (size + FLOAT_ERROR_TOLERANCE)
             && offset.y <= (size + FLOAT_ERROR_TOLERANCE)
@@ -35,13 +34,11 @@ pub(crate) fn offset_sectant(offset: &V3c<f32>, size: f32) -> u8 {
             && offset.z >= (-FLOAT_ERROR_TOLERANCE),
         "Expected relative offset {offset:?} to be inside {size}^3"
     );
-    // let index: V3c<usize> = (*offset * BOX_NODE_DIMENSION as f32 / size).floor().into();
-    // // During raytracing, positions on cube boundaries need to be mapped to an index inside @BOX_NODE_DIMENSION
-    // let index = index.cut_each_component(BOX_NODE_DIMENSION - 1);
-    // BOX_NODE_INDEX_TO_SECTANT_LUT[index.x][index.y][index.z]
+    // Scale to 0..BOX_NODE_CHILDREN_COUNT, then project to an unique index
     let index = (*offset * BOX_NODE_DIMENSION as f32 / size).floor();
     // During raytracing, positions on cube boundaries need to be mapped to an index inside @BOX_NODE_DIMENSION
     let index = index.cut_each_component((BOX_NODE_DIMENSION - 1) as f32);
+
     (index.x + (index.y * BOX_NODE_DIMENSION as f32) + (index.z * BOX_NODE_DIMENSION.pow(2) as f32))
         as u8 //flat_projection_f32
 }

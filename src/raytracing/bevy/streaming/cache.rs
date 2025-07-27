@@ -8,7 +8,6 @@ use crate::{
         BoxTreeGPUDataHandler, BrickOwnedBy, BrickUpdate, CacheUpdatePackage,
     },
 };
-use bendy::{decoding::FromBencode, encoding::ToBencode};
 use std::hash::Hash;
 
 impl BoxTreeGPUDataHandler {
@@ -141,10 +140,11 @@ impl BoxTreeGPUDataHandler {
             }
             NodeContent::Internal => {
                 debug_assert!(
-                        self.upload_targets.node_key_vs_meta_index
-                            .contains_right(&child_descriptor),
-                        "Expected erased child node index[{child_descriptor}] to be in metadata index hash!"
-                    );
+                    self.upload_targets
+                        .node_key_vs_meta_index
+                        .contains_right(&child_descriptor),
+                    "Expected erased child node index[{child_descriptor}] to be in metadata index hash!"
+                );
                 let child_key = self
                     .upload_targets
                     .node_key_vs_meta_index
@@ -242,33 +242,7 @@ impl BoxTreeGPUDataHandler {
     /// Writes: metadata, available child information, occupied bits and parent connections
     /// It will try to collecty MIP information if still available, but will not upload a MIP
     /// * `returns` - The update package for the insertion
-    pub(crate) fn add_node<
-        'a,
-        #[cfg(all(feature = "bytecode", feature = "serialization"))] T: FromBencode
-            + ToBencode
-            + Serialize
-            + DeserializeOwned
-            + Default
-            + Eq
-            + Clone
-            + Hash
-            + VoxelData
-            + Send
-            + Sync
-            + 'static,
-        #[cfg(all(feature = "bytecode", not(feature = "serialization")))] T: FromBencode + ToBencode + Default + Eq + Clone + Hash + VoxelData + Send + Sync + 'static,
-        #[cfg(all(not(feature = "bytecode"), feature = "serialization"))] T: Serialize
-            + DeserializeOwned
-            + Default
-            + Eq
-            + Clone
-            + Hash
-            + VoxelData
-            + Send
-            + Sync
-            + 'static,
-        #[cfg(all(not(feature = "bytecode"), not(feature = "serialization")))] T: Default + Eq + Clone + Hash + VoxelData,
-    >(
+    pub(crate) fn add_node<'a, T: VoxelData>(
         &mut self,
         tree: &'a BoxTree<T>,
         parent_key: usize,

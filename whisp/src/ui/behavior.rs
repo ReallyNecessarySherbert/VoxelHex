@@ -1,6 +1,6 @@
 use crate::{
     loader::TreeLoadingTask,
-    ui::{components::*, UiState},
+    ui::{UiState, components::*},
 };
 use bevy::{
     diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin},
@@ -47,7 +47,7 @@ pub(crate) fn update_performance_stats(
     let (mut performance_text, visibility, _) = performance_text
         .single_mut()
         .expect("Expected FPS counter to be available in UI");
-    if visibility == Visibility::Hidden || 0 != (time.elapsed().subsec_millis() % 100) {
+    if visibility == Visibility::Hidden || !time.elapsed().subsec_millis().is_multiple_of(100) {
         // No need to update User interface too frequently or when it is hidden
         return;
     }

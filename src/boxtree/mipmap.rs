@@ -14,26 +14,9 @@ use crate::{
         Cube,
     },
 };
-use std::{collections::HashMap, hash::Hash};
+use std::collections::HashMap;
 
-#[cfg(feature = "bytecode")]
-use bendy::{decoding::FromBencode, encoding::ToBencode};
-
-impl<
-        #[cfg(all(feature = "bytecode", feature = "serialization"))] T: FromBencode
-            + ToBencode
-            + Serialize
-            + DeserializeOwned
-            + Default
-            + Eq
-            + Clone
-            + Hash
-            + VoxelData,
-        #[cfg(all(feature = "bytecode", not(feature = "serialization")))] T: FromBencode + ToBencode + Default + Eq + Clone + Hash + VoxelData,
-        #[cfg(all(not(feature = "bytecode"), feature = "serialization"))] T: Serialize + DeserializeOwned + Default + Eq + Clone + Hash + VoxelData,
-        #[cfg(all(not(feature = "bytecode"), not(feature = "serialization")))] T: Default + Eq + Clone + Hash + VoxelData,
-    > BoxTree<T>
-{
+impl<T: VoxelData> BoxTree<T> {
     //####################################################################################
     //  ██████   ██████ █████ ███████████
     // ░░██████ ██████ ░░███ ░░███░░░░░███
@@ -475,21 +458,7 @@ impl MIPMapStrategy {
     }
 }
 
-impl<
-        #[cfg(all(feature = "bytecode", feature = "serialization"))] T: FromBencode
-            + ToBencode
-            + Serialize
-            + DeserializeOwned
-            + Default
-            + Eq
-            + Clone
-            + Hash
-            + VoxelData,
-        #[cfg(all(feature = "bytecode", not(feature = "serialization")))] T: FromBencode + ToBencode + Default + Eq + Clone + Hash + VoxelData,
-        #[cfg(all(not(feature = "bytecode"), feature = "serialization"))] T: Serialize + DeserializeOwned + Default + Eq + Clone + Hash + VoxelData,
-        #[cfg(all(not(feature = "bytecode"), not(feature = "serialization")))] T: Default + Eq + Clone + Hash + VoxelData,
-    > StrategyUpdater<'_, T>
-{
+impl<T: VoxelData> StrategyUpdater<'_, T> {
     /// Resets the strategy for MIP maps during resample operations
     pub fn reset(self) -> Self {
         self.0.mip_map_strategy = MIPMapStrategy::default();

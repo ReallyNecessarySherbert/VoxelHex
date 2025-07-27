@@ -24,10 +24,6 @@ pub(crate) enum CubeSides {
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
-#[cfg_attr(
-    feature = "serialization",
-    derive(serde::Serialize, serde::Deserialize)
-)]
 pub(crate) struct Cube {
     pub(crate) min_position: V3c<f32>,
     pub(crate) size: f32,

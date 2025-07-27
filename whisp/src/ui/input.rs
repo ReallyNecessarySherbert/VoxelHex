@@ -1,4 +1,4 @@
-use crate::{ui::behavior::SettingsChanged, ui::components::*, ui::UiState};
+use crate::{ui::UiState, ui::behavior::SettingsChanged, ui::components::*};
 use bevy::prelude::*;
 use bevy_lunex::prelude::*;
 use bevy_panorbit_camera::PanOrbitCamera;
@@ -253,10 +253,10 @@ pub(crate) fn handle_camera_update(
                 cam.target_focus -= dir;
             }
             if keys.pressed(KeyCode::KeyA) {
-                cam.target_focus += right;
+                cam.target_focus -= right;
             }
             if keys.pressed(KeyCode::KeyD) {
-                cam.target_focus -= right;
+                cam.target_focus += right;
             }
         }
     }
