@@ -632,6 +632,7 @@ pub(crate) fn setup(mut commands: Commands, asset_server: Res<AssetServer>, pkv:
       AD    - Move Sideways
       Shift - Move Y up
       Ctrl  - Move Y Down
+      Tab   - Reload view
 ---------------------------------
 Drag mouse to look around!
 ---------------------------------
