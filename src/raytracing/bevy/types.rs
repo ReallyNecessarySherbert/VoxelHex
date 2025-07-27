@@ -1,5 +1,5 @@
 use crate::{
-    boxtree::{BoxTree, V3cf32, VoxelData},
+    boxtree::{types::BoxTreeUpdatedSignalParams, BoxTree, V3cf32, VoxelData},
     raytracing::bevy::streaming::types::BoxTreeGPUDataHandler,
     spatial::Cube,
 };
@@ -88,7 +88,7 @@ where
 
     /// Updates made to the tree are collected in this buffer
     /// Changes made to nodes within the tree will automatically include them into
-    pub(crate) changes_buffer: Arc<RwLock<VecDeque<(Vec<(usize, u8)>, Vec<u8>)>>>,
+    pub(crate) changes_buffer: Arc<RwLock<VecDeque<BoxTreeUpdatedSignalParams>>>,
 }
 
 /// Container for all the views rendered by the library instance

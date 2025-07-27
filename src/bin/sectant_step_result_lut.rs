@@ -16,8 +16,7 @@ pub(crate) fn hash_region(offset: &V3c<f32>, size: f32) -> u8 {
             && offset.x >= 0.
             && offset.y >= 0.
             && offset.z >= 0.,
-        "Expected relative offset {:?} to be inside {size}^3",
-        offset
+        "Expected relative offset {offset:?} to be inside {size}^3"
     );
     let index: V3c<usize> = (*offset * BOX_NODE_DIMENSION as f32 / size).floor().into();
     flat_projection(index.x, index.y, index.z, BOX_NODE_DIMENSION) as u8
@@ -114,11 +113,10 @@ fn main() {
         }
     }
 
-    println!("CPU LUT:{:?}", sectant_step_result);
+    println!("CPU LUT:{sectant_step_result:?}");
     println!("WGSL LUT:");
     println!(
-        "//const\nvar<private> SECTANT_STEP_RESULT_LUT: array<array<array<array<vec3f, 3>, 3>, 3>,{}> = array<array<array<array<vec3f, 3>, 3>, 3>,{}>(",
-        BOX_NODE_CHILDREN_COUNT, BOX_NODE_CHILDREN_COUNT
+        "//const\nvar<private> SECTANT_STEP_RESULT_LUT: array<array<array<array<vec3f, 3>, 3>, 3>,{BOX_NODE_CHILDREN_COUNT}> = array<array<array<array<vec3f, 3>, 3>, 3>,{BOX_NODE_CHILDREN_COUNT}>("
     );
 
     for (sectant, step_lut) in sectant_step_result.iter().enumerate() {
@@ -128,7 +126,7 @@ fn main() {
             for (y, yarr) in xarr.iter().enumerate() {
                 print!("array<u32, 3>(");
                 for (idx, step_result) in yarr.iter().enumerate() {
-                    print!("{:?}", step_result);
+                    print!("{step_result:?}");
                     if idx < 2 {
                         print!(",");
                     }

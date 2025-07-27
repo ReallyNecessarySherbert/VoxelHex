@@ -377,7 +377,7 @@ impl<
 
         // Any child cleared during this operation needs to be freed up
         // and parent connection needs to be updated as well
-        if 0 < removed_children.len() {
+        if !removed_children.is_empty() {
             let mut node_stack = node_stack.to_vec();
             for child_sectant in removed_children {
                 let child_key = self.nodes.get(node_key).child(child_sectant);
@@ -390,13 +390,11 @@ impl<
                         let child_bounds = node_bounds.child_bounds_for(child_sectant);
                         node_stack.push((
                             child_key,
-                            child_bounds.sectant_for(
-                                &(&V3c::new(
-                                    (clear_position.x as f32).max(child_bounds.min_position.x),
-                                    (clear_position.y as f32).max(child_bounds.min_position.y),
-                                    (clear_position.z as f32).max(child_bounds.min_position.z),
-                                )),
-                            ),
+                            child_bounds.sectant_for(&V3c::new(
+                                (clear_position.x as f32).max(child_bounds.min_position.x),
+                                (clear_position.y as f32).max(child_bounds.min_position.y),
+                                (clear_position.z as f32).max(child_bounds.min_position.z),
+                            )),
                         ));
                         for (direction, side) in [
                             (V3c::new(-1., 0., 0.), CubeSides::Right),

@@ -33,8 +33,7 @@ pub(crate) fn offset_sectant(offset: &V3c<f32>, size: f32) -> u8 {
             && offset.x >= (-FLOAT_ERROR_TOLERANCE)
             && offset.y >= (-FLOAT_ERROR_TOLERANCE)
             && offset.z >= (-FLOAT_ERROR_TOLERANCE),
-        "Expected relative offset {:?} to be inside {size}^3",
-        offset
+        "Expected relative offset {offset:?} to be inside {size}^3"
     );
     // let index: V3c<usize> = (*offset * BOX_NODE_DIMENSION as f32 / size).floor().into();
     // // During raytracing, positions on cube boundaries need to be mapped to an index inside @BOX_NODE_DIMENSION
@@ -78,9 +77,7 @@ pub(crate) fn matrix_index_for(
             && bounds.min_position.x + bounds.size > position.x as f32
             && bounds.min_position.y + bounds.size > position.y as f32
             && bounds.min_position.z + bounds.size > position.z as f32,
-        "Position {:?} not inside bounds {:?}",
-        position,
-        bounds
+        "Position {position:?} not inside bounds {bounds:?}"
     );
 
     // --> In case the smallest possible node the contained matrix of voxels

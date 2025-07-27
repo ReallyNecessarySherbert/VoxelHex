@@ -55,9 +55,7 @@ impl Cube {
     pub(crate) fn sectant_for(&self, position: &V3c<f32>) -> u8 {
         debug_assert!(
             self.contains(position),
-            "Position {:?}, out of {:?}",
-            position,
-            self
+            "Position {position:?}, out of {self:?}"
         );
         offset_sectant(&(*position - self.min_position), self.size)
     }

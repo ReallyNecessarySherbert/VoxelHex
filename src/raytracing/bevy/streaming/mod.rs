@@ -74,7 +74,7 @@ pub(crate) fn handle_tree_updates<
         // Upload changes to root node
         let data_handler = &mut view.data_handler;
         cache_updates.push(data_handler.add_node(
-            &tree,
+            tree,
             BoxTree::<T>::ROOT_NODE_KEY as usize,
             BOX_NODE_CHILDREN_COUNT as u8,
         ));
@@ -101,7 +101,7 @@ pub(crate) fn handle_tree_updates<
             }
         } else {
             let mip_update =
-                data_handler.add_brick(&tree, BrickOwnedBy::NodeAsMIP(BoxTree::<T>::ROOT_NODE_KEY));
+                data_handler.add_brick(tree, BrickOwnedBy::NodeAsMIP(BoxTree::<T>::ROOT_NODE_KEY));
             if mip_update.allocation_failed {
                 // Can't fit new MIP brick into buffers, need to rebuild the pipeline
                 re_evaluate_view_size(view);
@@ -129,7 +129,7 @@ pub(crate) fn handle_tree_updates<
 
             if let Some(node_key) = tree.valid_child_for(parent_key, child_sectant) {
                 // Upload child Node to GPU
-                let new_node_update = data_handler.add_node(&tree, parent_key, child_sectant);
+                let new_node_update = data_handler.add_node(tree, parent_key, child_sectant);
 
                 if new_node_update.allocation_failed {
                     // Can't fit new brick into buffers, need to rebuild the pipeline
@@ -162,7 +162,7 @@ pub(crate) fn handle_tree_updates<
                     }
                 } else {
                     let mip_update =
-                        data_handler.add_brick(&tree, BrickOwnedBy::NodeAsMIP(node_key as u32));
+                        data_handler.add_brick(tree, BrickOwnedBy::NodeAsMIP(node_key as u32));
                     if mip_update.allocation_failed {
                         // Can't fit new MIP brick into buffers, need to rebuild the pipeline
                         re_evaluate_view_size(view);
@@ -213,7 +213,7 @@ pub(crate) fn handle_tree_updates<
                 let mut new_brick_requests = vec![];
                 let brick_update_requests = updated_sectants
                     .into_iter()
-                    .map(|sec| {
+                    .filter_map(|sec| {
                         let brick_ownership_entry = BrickOwnedBy::NodeAsChild(
                             parent_key as u32,
                             sec,
@@ -233,7 +233,6 @@ pub(crate) fn handle_tree_updates<
                             None
                         }
                     })
-                    .flatten()
                     .collect::<Vec<_>>();
 
                 // Re-upload relevant child bricks already inside the to GPU one more time
@@ -249,7 +248,7 @@ pub(crate) fn handle_tree_updates<
                                 allocation_failed: false,
                                 added_node: None,
                                 brick_updates: vec![BrickUpdate {
-                                    brick_index: brick_index,
+                                    brick_index,
                                     data: &brick[..],
                                 }],
                                 modified_nodes: vec![],
@@ -260,7 +259,7 @@ pub(crate) fn handle_tree_updates<
 
                 // Upload new bricks
                 for brick_request in new_brick_requests {
-                    let brick_update = data_handler.add_brick(&tree, brick_request);
+                    let brick_update = data_handler.add_brick(tree, brick_request);
                     if brick_update.allocation_failed {
                         // Can't fit new brick brick into buffers, need to rebuild the pipeline
                         re_evaluate_view_size(view);
@@ -395,7 +394,7 @@ fn write_range_to_buffer<U>(
 }
 
 impl Hash for BrickOwnedBy {
-    fn hash<H: Hasher>(&self, state: &mut H) -> () {
+    fn hash<H: Hasher>(&self, state: &mut H) {
         match self {
             BrickOwnedBy::NodeAsChild(node_key, child_sectant, _brick_position) => {
                 0.hash(state);
@@ -492,20 +491,19 @@ pub(crate) fn upload<
         .read()
         .expect("Expected to be able to read BoxTree");
 
-    let cache_updates;
-    if view.reload {
-        cache_updates = upload_queue::process(
+    let cache_updates = if view.reload {
+        upload_queue::process(
             &mut commands,
             &tree_binding,
             tree_host,
             &mut view,
             upload_queue_update,
-        );
+        )
     } else {
         let nodes_to_process = view.data_handler.node_uploads_per_frame;
         let tree_updates =
             handle_tree_updates(&tree_binding, tree_host, &mut view, nodes_to_process);
-        cache_updates = if tree_updates.is_empty() {
+        if tree_updates.is_empty() {
             upload_queue::process(
                 &mut commands,
                 &tree_binding,
@@ -515,8 +513,8 @@ pub(crate) fn upload<
             )
         } else {
             tree_updates
-        };
-    }
+        }
+    };
 
     // Apply writes to GPU
     let render_queue = &pipeline.render_queue;

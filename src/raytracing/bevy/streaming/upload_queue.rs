@@ -292,7 +292,7 @@ pub(crate) fn process<
         // rebuild upload queue if not already in progress
         if upload_queue_update.is_none() {
             let thread_pool = AsyncComputeTaskPool::get();
-            let viewport_center = view.spyglass.viewport.origin.clone();
+            let viewport_center = view.spyglass.viewport.origin;
             let brick_ownership = view.data_handler.upload_targets.brick_ownership.clone();
             let tree_arc = tree_host.tree.clone();
             let nodes_to_see = view.data_handler.upload_targets.nodes_to_see.clone();
@@ -318,7 +318,7 @@ pub(crate) fn process<
 
         // Upload root node to scene again
         let new_node_update = view.data_handler.add_node(
-            &tree,
+            tree,
             BoxTree::<T>::ROOT_NODE_KEY as usize,
             BOX_NODE_CHILDREN_COUNT as u8,
         );
@@ -331,7 +331,7 @@ pub(crate) fn process<
         cache_updates.push(new_node_update);
         let mip_update = view
             .data_handler
-            .add_brick(&tree, BrickOwnedBy::NodeAsMIP(BoxTree::<T>::ROOT_NODE_KEY));
+            .add_brick(tree, BrickOwnedBy::NodeAsMIP(BoxTree::<T>::ROOT_NODE_KEY));
         cache_updates.push(mip_update);
 
         view.reload = false;
@@ -383,7 +383,7 @@ pub(crate) fn process<
         for _ in 0..data_handler.node_uploads_per_frame {
             // Get next node to check
             let Some((parent_key, target_sectant, node_key, node_bounds)) = next_valid_node(
-                &tree,
+                tree,
                 &mut data_handler.upload_state.target_node_stack,
                 &data_handler
                     .upload_targets
@@ -403,7 +403,7 @@ pub(crate) fn process<
             {
                 // Upload MIP again, if not present already
                 let mip_update =
-                    data_handler.add_brick(&tree, BrickOwnedBy::NodeAsMIP(node_key as u32));
+                    data_handler.add_brick(tree, BrickOwnedBy::NodeAsMIP(node_key as u32));
                 if mip_update.allocation_failed {
                     // Can't fit new mip brick into buffers, need to rebuild the pipeline
                     re_evaluate_view_size(view);
@@ -412,7 +412,7 @@ pub(crate) fn process<
                 cache_updates.push(mip_update);
             } else {
                 // Upload Selected Node to GPU
-                let new_node_update = data_handler.add_node(&tree, parent_key, target_sectant);
+                let new_node_update = data_handler.add_node(tree, parent_key, target_sectant);
 
                 if new_node_update.allocation_failed {
                     // Can't fit new brick into buffers, need to rebuild the pipeline
@@ -423,7 +423,7 @@ pub(crate) fn process<
 
                 // Upload MIP to GPU
                 let mip_update =
-                    data_handler.add_brick(&tree, BrickOwnedBy::NodeAsMIP(node_key as u32));
+                    data_handler.add_brick(tree, BrickOwnedBy::NodeAsMIP(node_key as u32));
 
                 if mip_update.allocation_failed {
                     // Can't fit new MIP brick into buffers, need to rebuild the pipeline
@@ -456,7 +456,7 @@ pub(crate) fn process<
 
     // upload bricks from the upload list if there is any
     let data_handler = &mut view.data_handler;
-    let brick_requests = if 0 == data_handler.upload_state.bricks_to_upload.len() {
+    let brick_requests = if data_handler.upload_state.bricks_to_upload.is_empty() {
         vec![]
     } else {
         data_handler
@@ -482,7 +482,7 @@ pub(crate) fn process<
             continue;
         }
 
-        let brick_update = data_handler.add_brick(&tree, brick_request.clone());
+        let brick_update = data_handler.add_brick(tree, brick_request.clone());
         if brick_update.allocation_failed {
             // Can't fit new brick brick into buffers, need to rebuild the pipeline
             re_evaluate_view_size(view);
@@ -495,7 +495,6 @@ pub(crate) fn process<
 }
 
 fn process_node_children<
-    'a,
     #[cfg(all(feature = "bytecode", feature = "serialization"))] T: FromBencode
         + ToBencode
         + Serialize
@@ -535,7 +534,7 @@ fn process_node_children<
                         V3c::from(node_bounds.min_position),
                     );
                     if viewport_contains_target(
-                        &viewport_bl,
+                        viewport_bl,
                         view_distance,
                         &V3c::from(node_bounds.min_position),
                         &V3c::unit(node_bounds.size as u32),
@@ -548,8 +547,8 @@ fn process_node_children<
         }
         NodeContent::Leaf(bricks) => {
             execute_for_relevant_sectants(
-                &node_bounds,
-                &viewport_bl,
+                node_bounds,
+                viewport_bl,
                 view_distance as u32,
                 |position_in_target,
                  update_size_in_target,
@@ -568,7 +567,7 @@ fn process_node_children<
                             );
 
                             if viewport_contains_target(
-                                &viewport_bl,
+                                viewport_bl,
                                 view_distance,
                                 &position_in_target,
                                 &update_size_in_target,
@@ -610,11 +609,7 @@ fn next_valid_node<
     node_stack: &mut Vec<(usize, u8, Cube)>,
     nodes_to_see: &HashSet<usize>,
 ) -> Option<(usize, u8, usize, Cube)> {
-    let Some((current_node_key, mut target_sectant, current_node_bounds)) =
-        node_stack.last().cloned()
-    else {
-        return None;
-    };
+    let (current_node_key, mut target_sectant, current_node_bounds) = node_stack.last().cloned()?;
     debug_assert!(tree.nodes.key_is_valid(current_node_key));
     loop {
         if (target_sectant as usize) >= BOX_NODE_CHILDREN_COUNT

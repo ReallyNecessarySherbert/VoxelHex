@@ -190,7 +190,7 @@ impl<
             NodeContent::UniformLeaf(brick) => match brick {
                 BrickData::Empty => true,
                 BrickData::Solid(voxel) => NodeContent::pix_points_to_empty(
-                    &voxel,
+                    voxel,
                     &self.voxel_color_palette,
                     &self.voxel_data_palette,
                 ),

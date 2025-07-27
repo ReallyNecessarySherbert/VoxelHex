@@ -110,8 +110,7 @@ impl BoxTreeGPUDataHandler {
 
         debug_assert!(
             tree.nodes.key_is_valid(*parent_key),
-            "Expected parent node({:?}) to be valid",
-            parent_key
+            "Expected parent node({parent_key:?}) to be valid"
         );
 
         // Erase connection to parent
@@ -122,10 +121,7 @@ impl BoxTreeGPUDataHandler {
         debug_assert_ne!(
             child_descriptor,
             empty_marker::<u32>() as usize,
-            "Expected erased child[{}] of node[{}] meta[{}] to be an erasable node/brick",
-            child_sectant,
-            parent_key,
-            meta_index
+            "Expected erased child[{child_sectant}] of node[{parent_key}] meta[{meta_index}] to be an erasable node/brick"
         );
         self.upload_targets
             .node_index_vs_parent
@@ -301,20 +297,18 @@ impl BoxTreeGPUDataHandler {
                 modifications.added_node = Some(0);
             }
             (0, None)
+        } else if let Some(existing_node) = self
+            .upload_targets
+            .node_key_vs_meta_index
+            .get_by_left(&node_key)
+        {
+            (*existing_node, None)
         } else {
-            if let Some(existing_node) = self
-                .upload_targets
-                .node_key_vs_meta_index
-                .get_by_left(&node_key)
-            {
-                (*existing_node, None)
-            } else {
-                let Some((node_index, robbed_parent)) = self.first_available_node() else {
-                    return CacheUpdatePackage::allocation_failed();
-                };
-                modifications.added_node = Some(node_index);
-                (node_index, robbed_parent)
-            }
+            let Some((node_index, robbed_parent)) = self.first_available_node() else {
+                return CacheUpdatePackage::allocation_failed();
+            };
+            modifications.added_node = Some(node_index);
+            (node_index, robbed_parent)
         };
 
         let robbed_node_key_in_meta = self

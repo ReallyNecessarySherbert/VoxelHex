@@ -7,7 +7,10 @@ pub use crate::raytracing::bevy::types::{
     BoxTreeGPUHost, BoxTreeGPUView, BoxTreeSpyGlass, RenderBevyPlugin, VhxViewSet, Viewport,
 };
 use crate::{
-    boxtree::{Albedo, BoxTree, V3c, VoxelData},
+    boxtree::{
+        types::{BoxTreeNodeAccessStack, BoxTreeUpdatedSignalParams},
+        Albedo, BoxTree, V3c, VoxelData,
+    },
     raytracing::bevy::{
         pipeline::prepare_bind_groups,
         streaming::{types::UploadQueueUpdateTask, upload, upload_queue::rebuild},
@@ -133,7 +136,7 @@ fn handle_viewport_position_updates<
                 if upload_queue_update.is_none() {
                     // rebuild upload queue if movement was large enough
                     let thread_pool = AsyncComputeTaskPool::get();
-                    let viewport_center = view.spyglass.viewport.origin.clone();
+                    let viewport_center = view.spyglass.viewport.origin;
                     let viewing_distance = view.spyglass.viewport.frustum.z;
                     let brick_ownership = view.data_handler.upload_targets.brick_ownership.clone();
                     let tree_arc = tree_host.tree.clone();
@@ -154,7 +157,7 @@ fn handle_viewport_position_updates<
                 } else {
                     // upload queue update already in progress! store pending viewport request
                     view.data_handler.pending_upload_queue_update = Some((
-                        view.spyglass.viewport.origin.clone(),
+                        view.spyglass.viewport.origin,
                         view.spyglass.viewport.frustum.z,
                     ));
                 }
@@ -201,10 +204,10 @@ impl<
     > BoxTreeGPUHost<T>
 {
     pub fn new(mut tree: BoxTree<T>) -> Self {
-        let changes_buffer: Arc<RwLock<VecDeque<(Vec<(usize, u8)>, Vec<u8>)>>> = Arc::default();
+        let changes_buffer: Arc<RwLock<VecDeque<BoxTreeUpdatedSignalParams>>> = Arc::default();
         let changes_arc = changes_buffer.clone();
         tree.update_triggers.push(Arc::new(
-            move |node_stack: Vec<(usize, u8)>, updated_sectants: Vec<u8>| {
+            move |node_stack: BoxTreeNodeAccessStack, updated_sectants: Vec<u8>| {
                 changes_arc
                     .write()
                     .expect("Expected to be able to update BoxTree changes buffer")

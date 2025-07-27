@@ -1,7 +1,8 @@
 use crate::{
     boxtree::{
-        types::NodeContent, Albedo, BoxTree, MIPResamplingMethods, VoxelData,
-        BOX_NODE_CHILDREN_COUNT, BOX_NODE_DIMENSION,
+        types::{BoxTreeNodeAccessStack, NodeContent},
+        Albedo, BoxTree, MIPResamplingMethods, VoxelData, BOX_NODE_CHILDREN_COUNT,
+        BOX_NODE_DIMENSION,
     },
     spatial::{
         math::vector::{V3c, V3cf32},
@@ -141,7 +142,7 @@ impl<
         &self,
         node_key: usize,
         node_position: V3cf32,
-    ) -> Vec<(usize, u8)> {
+    ) -> BoxTreeNodeAccessStack {
         let mut current_bounds = Cube::root_bounds(self.boxtree_size as f32);
         let mut node_stack = vec![(
             Self::ROOT_NODE_KEY as usize,

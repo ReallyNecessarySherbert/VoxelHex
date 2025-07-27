@@ -251,7 +251,7 @@ impl<
                             - SECTANT_OFFSET_LUT[child_sectant as usize]
                                 * (self.brick_dim * BOX_NODE_DIMENSION as u32) as f32;
 
-                        let sample = match &self
+                        match &self
                             .nodes
                             .get(self.nodes.get(node_key).child(child_sectant))
                             .mip
@@ -279,8 +279,7 @@ impl<
                                 .albedo()
                                 .copied()
                             }
-                        };
-                        sample
+                        }
                     },
                 )
             }

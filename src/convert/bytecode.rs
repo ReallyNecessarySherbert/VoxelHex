@@ -545,7 +545,7 @@ impl FromBencode for MIPMapStrategy {
                     Object::Integer("1") => Ok(true),
                     Object::Integer(i) => Err(bendy::decoding::Error::unexpected_token(
                         "boolean field albedo_mip_maps",
-                        format!("the number: {}", i),
+                        format!("the number: {i}"),
                     )),
                     _ => Err(bendy::decoding::Error::unexpected_token(
                         "boolean field albedo_mip_maps",
@@ -625,7 +625,7 @@ impl FromBencode for MIPResamplingMethods {
             Object::Integer("2") => Ok(MIPResamplingMethods::PointFilterBD),
             Object::Integer(int) => match int
                 .parse::<u32>()
-                .unwrap_or_else(|_| panic!("Expected to be able to parse: {:?} as u32", int))
+                .unwrap_or_else(|_| panic!("Expected to be able to parse: {int:?} as u32"))
             {
                 thr if (3..1002).contains(&thr) => {
                     Ok(MIPResamplingMethods::Posterize((thr as f32 - 3.) / 1000.))
@@ -716,7 +716,7 @@ where
                     Object::Integer("1") => Ok(true),
                     Object::Integer(i) => Err(bendy::decoding::Error::unexpected_token(
                         "boolean field auto_simplify",
-                        format!("the number: {}", i),
+                        format!("the number: {i}"),
                     )),
                     _ => Err(bendy::decoding::Error::unexpected_token(
                         "boolean field auto_simplify",

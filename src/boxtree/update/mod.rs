@@ -584,16 +584,11 @@ impl<
     ) {
         debug_assert!(
             brick_bounds.contains(&(position.into())),
-            "Expected position {:?} to be contained in brick bounds {:?}",
-            position,
-            brick_bounds
+            "Expected position {position:?} to be contained in brick bounds {brick_bounds:?}"
         );
         debug_assert!(
             brick_bounds.contains(&V3c::from(position + size - V3c::unit(1))),
-            "Expected position {:?} and update_size {:?} to be contained in brick bounds {:?}",
-            position,
-            size,
-            brick_bounds
+            "Expected position {position:?} and update_size {size:?} to be contained in brick bounds {brick_bounds:?}"
         );
 
         let mat_index = matrix_index_for(brick_bounds, &position, brick_dim);

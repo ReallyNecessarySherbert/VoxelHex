@@ -48,7 +48,7 @@ where
                     Object::Integer("1") => Ok(true),
                     Object::Integer(i) => Err(bendy::decoding::Error::unexpected_token(
                         "boolean field reserved",
-                        format!("the number: {}", i),
+                        format!("the number: {i}"),
                     )),
                     _ => Err(bendy::decoding::Error::unexpected_token(
                         "boolean field reserved",

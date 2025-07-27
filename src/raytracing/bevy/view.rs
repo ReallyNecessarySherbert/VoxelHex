@@ -104,7 +104,7 @@ impl<
                 mips_enabled: tree.mip_map_strategy.is_enabled(),
                 boxtree_meta: BoxTreeMetaData {
                     boxtree_size: tree.boxtree_size,
-                    tree_properties: boxtree_properties(&tree),
+                    tree_properties: boxtree_properties(tree),
                     ambient_light_color: V3c::new(1., 1., 1.),
                     ambient_light_position: V3c::new(
                         tree.boxtree_size as f32,

@@ -190,9 +190,16 @@ pub(crate) struct NodeData {
     pub(crate) occlusion_bits: u8,
 }
 
+/// Data forwarded when a BoxTree is being updated
+pub(crate) type BoxTreeUpdatedSignalParams = (BoxTreeNodeAccessStack, Vec<u8>);
+
+/// A sequence of node_key, child sectant pairs describing the access path to a node
+/// where each pair is inside the previous element(parent node, target sectant)
+pub(crate) type BoxTreeNodeAccessStack = Vec<(usize, u8)>;
+
 /// A function being called when the data in the tree is being updated
 /// Fn(node_access_stack: Vec<(usize, u8)>, updated_sectants: Vec<u8>)
-pub type BoxTreeUpdatedSignal = Arc<dyn Fn(Vec<(usize, u8)>, Vec<u8>) + Send + Sync>;
+pub(crate) type BoxTreeUpdatedSignal = dyn Fn(BoxTreeNodeAccessStack, Vec<u8>) + Send + Sync;
 
 /// Sparse 64Tree of Voxel Bricks, where each leaf node contains a brick of voxels.
 /// A Brick is a 3 dimensional matrix, each element of it containing a voxel.
@@ -237,5 +244,5 @@ where
     pub(crate) mip_map_strategy: MIPMapStrategy,
 
     /// The signals to be called whenever the tree is updated
-    pub(crate) update_triggers: Vec<BoxTreeUpdatedSignal>,
+    pub(crate) update_triggers: Vec<Arc<BoxTreeUpdatedSignal>>,
 }

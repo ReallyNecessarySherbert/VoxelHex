@@ -11,7 +11,7 @@ use crate::{
         CubeSides,
     },
 };
-use std::{matches, u64};
+use std::matches;
 
 //####################################################################################
 //  ███████████  ███████████   █████   █████████  █████   ████
@@ -225,7 +225,7 @@ impl NodeData {
         }
         match self.children {
             NodeChildren::Children(ref mut c) => Some(&mut c[index]),
-            _ => panic!("Attempted to modify NodeChild[{:?}] of {:?}", index, self),
+            _ => panic!("Attempted to modify NodeChild[{index:?}] of {self:?}"),
         }
     }
 

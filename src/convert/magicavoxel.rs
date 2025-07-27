@@ -236,10 +236,7 @@ impl MIPMapStrategy {
         let mut shocovox_boxtree =
             BoxTree::<T>::new(tree_size, brick_dimension).unwrap_or_else(|err| {
                 panic!(
-                    "Expected to build a valid boxtree with dimension {:?} and brick dimension {:?}; Instead: {:?}",
-                    tree_size,
-                    brick_dimension,
-                    err
+                    "Expected to build a valid boxtree with dimension {tree_size:?} and brick dimension {brick_dimension:?}; Instead: {err:?}"
                 )
             });
 
@@ -394,11 +391,10 @@ impl<
                     Err(boxtree_error) => match boxtree_error {
                         OctreeError::InvalidPosition { .. } => {
                             panic!(
-                                "inserting into boxtree at at invalid position: {:?}",
-                                boxtree_error
+                                "inserting into boxtree at at invalid position: {boxtree_error:?}"
                             )
                         }
-                        _ => panic!("inserting into boxtree yielded: {:?}", boxtree_error),
+                        _ => panic!("inserting into boxtree yielded: {boxtree_error:?}"),
                     },
                 }
             }
