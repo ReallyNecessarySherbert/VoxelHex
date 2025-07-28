@@ -1,4 +1,4 @@
-use crate::{ui::UiState, ui::behavior::SettingsChanged, ui::components::*};
+use crate::{ui::behavior::SettingsChanged, ui::components::*, ui::UiState};
 use bevy::prelude::*;
 use bevy_lunex::prelude::*;
 use bevy_panorbit_camera::PanOrbitCamera;
@@ -100,10 +100,22 @@ pub(crate) struct CameraPosition {
     pitch: f32,
 }
 
+impl CameraPosition {
+    /// Baked position to showcase default voxel model
+    pub(crate) fn baked_model_pose() -> Self {
+        CameraPosition {
+            focus: Vec3::new(421.03085, 108.76257, 309.92087),
+            radius: 300.0,
+            yaw: 5.3603134,
+            pitch: -0.75049293,
+        }
+    }
+}
+
 impl Default for CameraPosition {
     fn default() -> Self {
         CameraPosition {
-            focus: Vec3::new(421.03085, 108.76257, 309.92087),
+            focus: Vec3::new(0., 0., 0.),
             radius: 300.0,
             yaw: 5.3603134,
             pitch: -0.75049293,

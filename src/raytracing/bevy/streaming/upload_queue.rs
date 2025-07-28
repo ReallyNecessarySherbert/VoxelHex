@@ -10,15 +10,15 @@ use crate::{
             streaming::{
                 re_evaluate_view_size,
                 types::{
-                    BrickOwnedBy, BrickOwnership, CacheUpdatePackage, UploadQueueTargets,
-                    UploadQueueUpdateTask,
+                    BrickOwnedBy, BrickOwnership, CacheUpdatePackage, UploadQueueStatus,
+                    UploadQueueTargets, UploadQueueUpdateTask,
                 },
             },
             types::BoxTreeGPUHost,
         },
         BoxTreeGPUView,
     },
-    spatial::{raytracing::viewport_contains_target, Cube},
+    spatial::Cube,
 };
 use bevy::{
     ecs::system::ResMut,
@@ -89,18 +89,15 @@ pub(crate) fn rebuild<T: VoxelData>(
     );
 
     // Decide the level boundaries to work within
-    let max_mip_level = (tree.boxtree_size as f32 / tree.brick_dim as f32)
-        .log(4.)
-        .ceil() as u32;
     let deepest_mip_level_to_upload = (((viewport_bl_ - viewport_bl).length() / view_distance)
         .ceil() as u32)
-        .min(max_mip_level)
+        .min(tree.max_mip_level())
         .max(1);
 
     // Look for the smallest node covering the entirety of the viewing distance
     let mut center_node_parent = None;
     let mut node_bounds = Cube::root_bounds(tree.boxtree_size as f32);
-    let mut node_mip_level = max_mip_level;
+    let mut node_mip_level = tree.max_mip_level();
     let mut node_stack = vec![(BoxTree::<T>::ROOT_NODE_KEY as usize)];
     loop {
         let node_key = node_stack.last().unwrap();
@@ -139,7 +136,7 @@ pub(crate) fn rebuild<T: VoxelData>(
         .insert(*center_node_key);
 
     // add center node together with children inside the viewport into the queue
-    add_children_to_upload_queue(
+    add_children_nodes_to_upload_queue(
         center_node_parent.unwrap_or((*center_node_key, node_bounds, node_mip_level)),
         tree,
         &viewport_center,
@@ -150,7 +147,7 @@ pub(crate) fn rebuild<T: VoxelData>(
     );
 }
 
-fn add_children_to_upload_queue<T: VoxelData>(
+fn add_children_nodes_to_upload_queue<T: VoxelData>(
     (node_key, node_bounds, node_mip_level): (usize, Cube, u32),
     tree: &BoxTree<T>,
     viewport_center: &V3c<f32>,
@@ -184,31 +181,24 @@ fn add_children_to_upload_queue<T: VoxelData>(
                 &node_bounds,
                 &current_bl,
                 current_include_distance as u32,
-                |position_in_target,
-                 update_size_in_target,
+                |_position_in_target,
+                 _update_size_in_target,
                  target_child_sectant,
                  &target_bounds| {
                     if let Some(child_key) = tree.valid_child_for(node_key, target_child_sectant) {
-                        if viewport_contains_target(
-                            &current_bl,
-                            current_include_distance,
-                            &position_in_target,
-                            &update_size_in_target,
-                        ) {
-                            nodes_to_see
-                                .write()
-                                .expect("Expected to be able to update list of nodes in view!")
-                                .insert(child_key);
-                            add_children_to_upload_queue(
-                                (child_key, target_bounds, node_mip_level - 1),
-                                tree,
-                                viewport_center,
-                                view_distance,
-                                min_mip_level,
-                                nodes_to_see.clone(),
-                                brick_ownership.clone(), // It's cloning an Arc
-                            );
-                        }
+                        nodes_to_see
+                            .write()
+                            .expect("Expected to be able to update list of nodes in view!")
+                            .insert(child_key);
+                        add_children_nodes_to_upload_queue(
+                            (child_key, target_bounds, node_mip_level - 1),
+                            tree,
+                            viewport_center,
+                            view_distance,
+                            min_mip_level,
+                            nodes_to_see.clone(),
+                            brick_ownership.clone(), // It's cloning an Arc
+                        );
                     }
                 },
             );
@@ -258,31 +248,9 @@ pub(crate) fn process<'a, T: VoxelData>(
             })));
         }
 
-        // Set target_node_stack to the start of the tree
-        view.data_handler.upload_state.target_node_stack = vec![(
-            BoxTree::<T>::ROOT_NODE_KEY as usize,
-            0,
-            Cube::root_bounds(tree.get_size() as f32),
-        )];
-
-        // Upload root node to scene again
-        let new_node_update = view.data_handler.add_node(
-            tree,
-            BoxTree::<T>::ROOT_NODE_KEY as usize,
-            BOX_NODE_CHILDREN_COUNT as u8,
-        );
-        debug_assert_eq!(
-            0,
-            new_node_update
-                .added_node
-                .expect("Expected update package to contain an added node")
-        );
-        cache_updates.push(new_node_update);
-        let mip_update = view
-            .data_handler
-            .add_brick(tree, BrickOwnedBy::NodeAsMIP(BoxTree::<T>::ROOT_NODE_KEY));
-        cache_updates.push(mip_update);
-
+        // Set target_node_stack to evaluate tree from root node again
+        view.data_handler.upload_state.target_node_stack =
+            UploadQueueStatus::node_stack_init_value(tree);
         view.reload = false;
     }
 
@@ -290,11 +258,8 @@ pub(crate) fn process<'a, T: VoxelData>(
     if let Some(ref mut upload_queue_update) = upload_queue_update {
         if block_on(future::poll_once(&mut upload_queue_update.0)).is_some() {
             commands.remove_resource::<UploadQueueUpdateTask>();
-            view.data_handler.upload_state.target_node_stack = vec![(
-                BoxTree::<T>::ROOT_NODE_KEY as usize,
-                0,
-                Cube::root_bounds(tree.get_size() as f32),
-            )];
+            view.data_handler.upload_state.target_node_stack =
+                UploadQueueStatus::node_stack_init_value(tree);
         }
     }
 
@@ -386,7 +351,7 @@ pub(crate) fn process<'a, T: VoxelData>(
             data_handler
                 .upload_state
                 .bricks_to_upload
-                .append(&mut process_node_children(
+                .append(&mut process_node_child_bricks(
                     tree,
                     node_key,
                     &node_bounds,
@@ -443,7 +408,7 @@ pub(crate) fn process<'a, T: VoxelData>(
     cache_updates
 }
 
-fn process_node_children<T: VoxelData>(
+fn process_node_child_bricks<T: VoxelData>(
     tree: &BoxTree<T>,
     node_key: usize,
     node_bounds: &Cube,
@@ -466,13 +431,7 @@ fn process_node_children<T: VoxelData>(
                         0,
                         V3c::from(node_bounds.min_position),
                     );
-                    if viewport_contains_target(
-                        viewport_bl,
-                        view_distance,
-                        &V3c::from(node_bounds.min_position),
-                        &V3c::unit(node_bounds.size as u32),
-                    ) && !brick_ownership.contains_right(&brick_ownership_entry)
-                    {
+                    if !brick_ownership.contains_right(&brick_ownership_entry) {
                         result.push(brick_ownership_entry);
                     }
                 }
@@ -483,8 +442,8 @@ fn process_node_children<T: VoxelData>(
                 node_bounds,
                 viewport_bl,
                 view_distance as u32,
-                |position_in_target,
-                 update_size_in_target,
+                |_position_in_target,
+                 _update_size_in_target,
                  target_child_sectant,
                  &target_bounds| {
                     match &bricks[target_child_sectant as usize] {
@@ -498,16 +457,7 @@ fn process_node_children<T: VoxelData>(
                                 target_child_sectant,
                                 V3c::from(target_bounds.min_position),
                             );
-
-                            if viewport_contains_target(
-                                viewport_bl,
-                                view_distance,
-                                &position_in_target,
-                                &update_size_in_target,
-                            ) && brick_ownership
-                                .get_by_right(&brick_ownership_entry)
-                                .is_none()
-                            {
+                            if !brick_ownership.contains_right(&brick_ownership_entry) {
                                 result.push(brick_ownership_entry);
                             }
                         }
@@ -528,6 +478,20 @@ fn next_valid_node<T: VoxelData>(
 ) -> Option<(usize, u8, usize, Cube)> {
     let (current_node_key, mut target_sectant, current_node_bounds) = node_stack.last().cloned()?;
     debug_assert!(tree.nodes.key_is_valid(current_node_key));
+
+    // See if root node is being evaluated
+    if current_node_key == BoxTree::<T>::ROOT_NODE_KEY as usize
+        && (target_sectant as usize) == BOX_NODE_CHILDREN_COUNT
+    {
+        node_stack.last_mut().unwrap().1 = 0;
+        return Some((
+            current_node_key,
+            BOX_NODE_CHILDREN_COUNT as u8,
+            current_node_key,
+            current_node_bounds,
+        ));
+    }
+
     loop {
         if (target_sectant as usize) >= BOX_NODE_CHILDREN_COUNT
             || tree.nodes.get(current_node_key).children == NodeChildren::NoChildren
@@ -567,6 +531,7 @@ fn next_valid_node<T: VoxelData>(
         if (target_sectant as usize) >= BOX_NODE_CHILDREN_COUNT {
             continue;
         }
+
         // If child is a leaf node, or occluded
         if tree.nodes.get(child_key).children == NodeChildren::NoChildren
             || tree.nodes.get(child_key).is_occluded()
@@ -594,7 +559,7 @@ fn next_valid_node<T: VoxelData>(
                 current_node_key,
                 result_target_sectant,
                 result_child_key,
-                current_node_bounds,
+                current_node_bounds.child_bounds_for(result_target_sectant),
             ));
         }
 
@@ -605,6 +570,7 @@ fn next_valid_node<T: VoxelData>(
             0,
             current_node_bounds.child_bounds_for(target_sectant),
         ));
+
         return Some((
             current_node_key,
             target_sectant,

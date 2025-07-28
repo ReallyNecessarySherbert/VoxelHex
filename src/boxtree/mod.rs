@@ -315,4 +315,11 @@ impl<T: VoxelData> BoxTree<T> {
             }
         }
     }
+
+    /// Calculates the maximum MIP level of the tree instance
+    pub(crate) fn max_mip_level(&self) -> u32 {
+        (self.boxtree_size as f32 / self.brick_dim as f32)
+            .log(4.)
+            .ceil() as u32
+    }
 }

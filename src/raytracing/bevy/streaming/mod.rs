@@ -9,7 +9,9 @@ use crate::{
     },
     object_pool::empty_marker,
     raytracing::bevy::{
-        streaming::types::{BrickOwnedBy, BrickUpdate, CacheUpdatePackage, UploadQueueUpdateTask},
+        streaming::types::{
+            BrickOwnedBy, BrickUpdate, CacheUpdatePackage, UploadQueueStatus, UploadQueueUpdateTask,
+        },
         types::{BoxTreeGPUHost, BoxTreeGPUView, VhxRenderPipeline, VhxViewSet},
     },
     spatial::Cube,
@@ -260,17 +262,13 @@ pub(crate) fn handle_tree_updates<'a, T: VoxelData>(
             .is_empty()
         {
             // Set target_node_stack to the start of the tree
-            view.data_handler.upload_state.target_node_stack = vec![(
-                BoxTree::<T>::ROOT_NODE_KEY as usize,
-                0,
-                Cube::root_bounds(
-                    tree_host
+            view.data_handler.upload_state.target_node_stack =
+                UploadQueueStatus::node_stack_init_value(
+                    &tree_host
                         .tree
                         .read()
-                        .expect("Expected to be able to read BoxTree size")
-                        .get_size() as f32,
-                ),
-            )];
+                        .expect("Expected to be able to read BoxTree size"),
+                );
         }
     }
     cache_updates
@@ -379,6 +377,16 @@ impl Hash for BrickOwnedBy {
                 BOX_NODE_CHILDREN_COUNT.hash(state)
             }
         }
+    }
+}
+
+impl UploadQueueStatus {
+    pub(crate) fn node_stack_init_value<T: VoxelData>(tree: &BoxTree<T>) -> Vec<(usize, u8, Cube)> {
+        vec![(
+            BoxTree::<T>::ROOT_NODE_KEY as usize,
+            BOX_NODE_CHILDREN_COUNT as u8,
+            Cube::root_bounds(tree.get_size() as f32),
+        )]
     }
 }
 

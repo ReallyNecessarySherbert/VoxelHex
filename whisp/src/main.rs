@@ -76,7 +76,7 @@ fn init_preferences_cache() -> PkvStore {
     let mut pkv = PkvStore::new("MinistryOfVoxelAffairs", "Whisp");
 
     if pkv.get::<CameraPosition>("camera_position").is_err() {
-        pkv.set("CameraPosition", &CameraPosition::default())
+        pkv.set("CameraPosition", &CameraPosition::baked_model_pose())
             .expect("Failed to store default value: camera_position");
     }
     if pkv.get::<String>("camera_locked").is_err() {

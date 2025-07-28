@@ -265,6 +265,15 @@ impl<T: Div<Output = T> + Copy> Div<T> for V3c<T> {
     }
 }
 
+#[cfg(feature = "bevy_wgpu")]
+impl From<bevy::prelude::Vec3> for V3c<f32> {
+    fn from(vec: bevy::prelude::Vec3) -> V3c<f32> {
+        {
+            V3c::new(vec.x, vec.y, vec.z)
+        }
+    }
+}
+
 impl From<V3c<usize>> for V3c<f32> {
     fn from(vec: V3c<usize>) -> V3c<f32> {
         {

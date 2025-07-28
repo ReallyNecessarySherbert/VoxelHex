@@ -36,7 +36,7 @@ impl<T: VoxelData> BoxTreeGPUHost<T> {
     pub fn create_new_view(
         &mut self,
         viewset: &mut VhxViewSet,
-        viewport: Viewport,
+        mut viewport: Viewport,
         resolution: [u32; 2],
         mut images: ResMut<Assets<Image>>,
     ) -> usize {
@@ -106,12 +106,12 @@ impl<T: VoxelData> BoxTreeGPUHost<T> {
             pending_upload_queue_update: None,
             nodes_in_view,
             bricks_in_view,
-            node_uploads_per_frame: 50,
+            node_uploads_per_frame: 25,
             brick_uploads_per_frame: 50,
-            brick_unload_search_perimeter: 8,
+            brick_unload_search_perimeter: 10,
         };
         let output_texture = create_output_texture(resolution, &mut images);
-
+        viewport.update_matrices(resolution);
         viewset.views.push(Arc::new(RwLock::new(BoxTreeGPUView {
             resolution,
             reload: true,

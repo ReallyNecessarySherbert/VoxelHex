@@ -363,14 +363,16 @@ impl BoxTreeGPUDataHandler {
             self.upload_targets
                 .node_key_vs_meta_index
                 .contains_left(&parent_key),
-            "Expected node parent[{parent_key}] to be in GPU render data at the time of upload!"
+            "Expected node parent[{parent_key}] to be in GPU render data while uploading child[{target_sectant}](node[{node_key}])!"
         );
         if BoxTree::<T>::ROOT_NODE_KEY as usize != node_key {
             let parent_meta_index = self
                 .upload_targets
                 .node_key_vs_meta_index
                 .get_by_left(&parent_key)
-                .unwrap();
+                .expect(
+                &format!("Expected node parent[{parent_key}] to be in GPU render data while uploading child[{target_sectant}](node[{node_key}])!").to_string()
+                );
             let parent_child_index =
                 (parent_meta_index * BOX_NODE_CHILDREN_COUNT) + target_sectant as usize;
             self.render_data.node_children[parent_child_index] = node_index as u32;
