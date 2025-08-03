@@ -98,23 +98,23 @@ fn setup(mut commands: Commands, images: ResMut<Assets<Image>>) {
         }
     }
 
-    let mut host = BoxTreeGPUHost { tree };
+    let mut host = BoxTreeGPUHost::new(tree);
     let mut views = VhxViewSet::new();
     let view_index = host.create_new_view(
         &mut views,
         Viewport::new(
             V3c {
                 x: 0.,
-                y: 300.,
+                y: 100.,
                 z: 0.,
             },
             V3c {
                 x: 0.,
                 y: 0.,
-                z: -1.,
+                z: -10.,
             },
-            V3c::new(10., 10., 1000.),
-            3.,
+            V3c::new(10., 10., 1024.),
+            50.,
         ),
         DISPLAY_RESOLUTION,
         images,
@@ -133,12 +133,16 @@ fn setup(mut commands: Commands, images: ResMut<Assets<Image>>) {
             ..default()
         },
         PanOrbitCamera {
-            focus: Vec3::new(0., 300., 0.),
+            focus: Vec3::new(0., 100., -10.),
             ..default()
         },
     ));
     commands.spawn(Camera2d::default());
     println!("Takes a while to create the compute pipeline, please hang on! Thanks");
+    #[cfg(debug_assertions)]
+    println!(
+        "WARNING! Example ran in debug mode, might take a while to load, and will be pretty slow.."
+    );
 }
 
 #[cfg(feature = "bevy_wgpu")]
@@ -184,44 +188,51 @@ fn handle_zoom(
     mut view_set: ResMut<VhxViewSet>,
     mut camera_query: Query<&mut PanOrbitCamera>,
 ) {
-    let Some(mut tree_view) = view_set.view_mut(0) else {
+    let Some(mut view) = view_set.view_mut(0) else {
         return; // Nothing to do without views!
     };
 
+    // Render the current view with CPU
     if keys.pressed(KeyCode::Tab) {
-        // Render the current view with CPU
-        let viewport_up_direction = V3c::new(0., 1., 0.);
-        let viewport_right_direction = viewport_up_direction
-            .cross(tree_view.spyglass.viewport().direction)
-            .normalized();
-        let pixel_width = tree_view.spyglass.view_frustum().x as f32 / DISPLAY_RESOLUTION[0] as f32;
-        let pixel_height =
-            tree_view.spyglass.view_frustum().y as f32 / DISPLAY_RESOLUTION[1] as f32;
-        let viewport_bottom_left = tree_view.spyglass.viewport().origin()
-            + (tree_view.spyglass.viewport().direction * tree_view.spyglass.view_frustum().z)
-            - (viewport_up_direction * (tree_view.spyglass.view_frustum().y / 2.))
-            - (viewport_right_direction * (tree_view.spyglass.view_frustum().x / 2.));
-
         // define light
         let diffuse_light_normal = V3c::new(0., -1., 1.).normalized();
         let mut img = ImageBuffer::new(DISPLAY_RESOLUTION[0], DISPLAY_RESOLUTION[1]);
+
         // cast each ray for a hit
+        view.spyglass
+            .viewport_mut()
+            .update_matrices(DISPLAY_RESOLUTION);
         for x in 0..DISPLAY_RESOLUTION[0] {
             for y in 0..DISPLAY_RESOLUTION[1] {
                 let actual_y_in_image = DISPLAY_RESOLUTION[1] - y - 1;
-                //from the origin of the camera to the current point of the viewport
-                let glass_point = viewport_bottom_left
-                    + viewport_right_direction * x as f32 * pixel_width
-                    + viewport_up_direction * y as f32 * pixel_height;
+
+                // Calculate NDC (Normalized Device Coordinates) from pixel coordinates
+                let ndc_x = (x as f32 + 0.5) / DISPLAY_RESOLUTION[0] as f32 * 2.0 - 1.0;
+                let ndc_y = (y as f32 + 0.5) / DISPLAY_RESOLUTION[1] as f32 * 2.0 - 1.0;
+                let ndc_near = Vec4::new(ndc_x, ndc_y, -1.0, 1.0); // near plane in NDC
+                let ndc_far = Vec4::new(ndc_x, ndc_y, 1.0, 1.0); // far plane in NDC
+
+                // Transform NDC coordinates to world space
+                let world_near = view.spyglass.viewport().inverse_view_projection_matrix * ndc_near;
+                let world_far = view.spyglass.viewport().inverse_view_projection_matrix * ndc_far;
+                let world_near_pos = world_near.truncate() / world_near.w;
+                let world_far_pos = world_far.truncate() / world_far.w;
+                let ray_direction = (world_far_pos - world_near_pos).normalize();
+
                 let ray = Ray {
-                    origin: tree_view.spyglass.viewport().origin(),
-                    direction: (glass_point - tree_view.spyglass.viewport().origin()).normalized(),
+                    origin: view.spyglass.viewport().origin(),
+                    direction: V3cf32::from(ray_direction),
                 };
 
                 use std::io::Write;
                 std::io::stdout().flush().ok().unwrap();
 
-                if let Some(hit) = tree.tree.get_by_ray(&ray) {
+                if let Some(hit) = tree
+                    .tree
+                    .read()
+                    .expect("Expected to be able to read Tree from GPU host")
+                    .get_by_ray(&ray)
+                {
                     let (data, _, normal) = hit;
                     //Because both vector should be normalized, the dot product should be 1*1*cos(angle)
                     //That means it is in range -1, +1, which should be accounted for
@@ -246,10 +257,10 @@ fn handle_zoom(
     }
 
     if keys.pressed(KeyCode::Home) {
-        tree_view.spyglass.viewport_mut().fov *= 1. + 0.09;
+        view.spyglass.viewport_mut().fov *= 1. + 0.09;
     }
     if keys.pressed(KeyCode::End) {
-        tree_view.spyglass.viewport_mut().fov *= 1. - 0.09;
+        view.spyglass.viewport_mut().fov *= 1. - 0.09;
     }
 
     let mut cam = camera_query
@@ -263,13 +274,13 @@ fn handle_zoom(
     }
 
     if keys.pressed(KeyCode::NumpadAdd) {
-        tree_view.spyglass.viewport_mut().frustum.z *= 1.01;
+        view.spyglass.viewport_mut().frustum.z *= 1.01;
     }
     if keys.pressed(KeyCode::NumpadSubtract) {
-        tree_view.spyglass.viewport_mut().frustum.z *= 0.99;
+        view.spyglass.viewport_mut().frustum.z *= 0.99;
     }
     if keys.pressed(KeyCode::F3) {
-        println!("{:?}", tree_view.spyglass.viewport());
+        println!("{:?}", view.spyglass.viewport());
     }
 
     if let Some(_) = cam.radius {
@@ -283,10 +294,10 @@ fn handle_zoom(
             cam.target_focus -= dir;
         }
         if keys.pressed(KeyCode::KeyA) {
-            cam.target_focus += right;
+            cam.target_focus -= right;
         }
         if keys.pressed(KeyCode::KeyD) {
-            cam.target_focus -= right;
+            cam.target_focus += right;
         }
     }
 }

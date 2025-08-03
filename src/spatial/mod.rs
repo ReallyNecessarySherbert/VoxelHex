@@ -13,7 +13,17 @@ use crate::{
     spatial::math::vector::V3c,
 };
 
-#[derive(Default, Clone, Copy, Debug)]
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum CubeSides {
+    Back = 0,
+    Front = 1,
+    Top = 2,
+    Bottom = 3,
+    Left = 4,
+    Right = 5,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub(crate) struct Cube {
     pub(crate) min_position: V3c<f32>,
     pub(crate) size: f32,
@@ -41,9 +51,7 @@ impl Cube {
     pub(crate) fn sectant_for(&self, position: &V3c<f32>) -> u8 {
         debug_assert!(
             self.contains(position),
-            "Position {:?}, out of {:?}",
-            position,
-            self
+            "Position {position:?}, out of {self:?}"
         );
         offset_sectant(&(*position - self.min_position), self.size)
     }

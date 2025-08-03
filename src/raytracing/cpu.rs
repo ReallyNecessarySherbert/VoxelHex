@@ -1,13 +1,13 @@
 use crate::{
     boxtree::{
-        BOX_NODE_DIMENSION, BoxTree, BoxTreeEntry, OOB_SECTANT, V3c, VoxelData,
-        types::{BrickData, NodeChildren, NodeContent, PaletteIndexValues},
+        types::{BrickData, NodeContent, PaletteIndexValues},
+        BoxTree, BoxTreeEntry, V3c, VoxelData, BOX_NODE_CHILDREN_COUNT, BOX_NODE_DIMENSION,
     },
     spatial::{
-        Cube,
         lut::RAY_TO_NODE_OCCUPANCY_BITMASK_LUT,
         math::{flat_projection, hash_direction, offset_sectant},
-        raytracing::{Ray, cube_impact_normal, step_sectant},
+        raytracing::{cube_impact_normal, step_sectant, Ray},
+        Cube,
     },
 };
 
@@ -38,10 +38,6 @@ impl<T, const SIZE: usize> NodeStack<T, SIZE>
 where
     T: Default + Copy,
 {
-    pub(crate) fn is_empty(&self) -> bool {
-        0 == self.count
-    }
-
     pub(crate) fn push(&mut self, data: T) {
         self.head_index = (self.head_index + 1) % SIZE;
         self.count = (self.count + 1).min(SIZE as u8);
@@ -314,35 +310,28 @@ impl<T: VoxelData> BoxTree<T> {
                     current_bounds.child_bounds_for(target_sectant),
                 )
             } else {
-                (ray.origin, OOB_SECTANT, current_bounds)
+                (ray.origin, BOX_NODE_CHILDREN_COUNT as u8, current_bounds)
             };
         let mut current_node_key: usize;
 
-        while target_sectant != OOB_SECTANT {
+        while (target_sectant as usize) < BOX_NODE_CHILDREN_COUNT {
             current_node_key = Self::ROOT_NODE_KEY as usize;
             current_bounds = Cube::root_bounds(self.boxtree_size as f32);
             node_stack.push(Self::ROOT_NODE_KEY);
-            while !node_stack.is_empty() {
+            while let Some(node_stack_last) = node_stack.last() {
                 let current_node_occupied_bits =
-                    self.stored_occupied_bits(*node_stack.last().unwrap() as usize);
-                debug_assert!(
-                    self.nodes
-                        .key_is_valid(*node_stack.last().unwrap() as usize)
-                );
+                    self.nodes.get(*node_stack_last as usize).occupied_bits;
+                debug_assert!(self.nodes.key_is_valid(*node_stack_last as usize));
 
                 let mut do_backtrack_after_leaf_miss = matches!(
-                    self.nodes.get(current_node_key),
+                    self.nodes.get(current_node_key).content,
                     NodeContent::UniformLeaf(_)
                 );
 
                 // Probe bricks in leaf nodes if target not out of bounds
-                if target_sectant != OOB_SECTANT {
-                    match self.nodes.get(current_node_key) {
+                if (target_sectant as usize) < BOX_NODE_CHILDREN_COUNT {
+                    match &self.nodes.get(current_node_key).content {
                         NodeContent::UniformLeaf(brick) => {
-                            debug_assert!(matches!(
-                                self.node_children[current_node_key],
-                                NodeChildren::OccupancyBitmap(_)
-                            ));
                             if let Some(hit) = self.probe_brick(
                                 ray,
                                 &mut ray_current_point,
@@ -355,10 +344,6 @@ impl<T: VoxelData> BoxTree<T> {
                             do_backtrack_after_leaf_miss = true;
                         }
                         NodeContent::Leaf(bricks) => {
-                            debug_assert!(matches!(
-                                self.node_children[current_node_key],
-                                NodeChildren::OccupancyBitmap(_)
-                            ));
                             if let Some(hit) = self.probe_brick(
                                 ray,
                                 &mut ray_current_point,
@@ -369,12 +354,12 @@ impl<T: VoxelData> BoxTree<T> {
                                 return Some(hit);
                             }
                         }
-                        NodeContent::Internal(_) | NodeContent::Nothing => {}
+                        NodeContent::Internal | NodeContent::Nothing => {}
                     }
                 };
 
                 if do_backtrack_after_leaf_miss
-                    || target_sectant == OOB_SECTANT
+                    || (target_sectant as usize) >= BOX_NODE_CHILDREN_COUNT
                     // The current Node is empty
                     || 0 == current_node_occupied_bits
                     // There is no overlap between node occupancy and the area the ray potentially hits
@@ -405,15 +390,17 @@ impl<T: VoxelData> BoxTree<T> {
                         current_node_key = *parent as usize;
                     }
                     continue; // Restart loop with the parent Node
-                    // Eliminating this `continue` causes significant slowdown in GPU?!
+                              // Eliminating this `continue` causes significant slowdown in GPU?!
                 }
 
-                if matches!(self.nodes.get(current_node_key), NodeContent::Internal(_))
-                    && 0 != (current_node_occupied_bits & (0x01 << target_sectant))
+                if matches!(
+                    self.nodes.get(current_node_key).content,
+                    NodeContent::Internal
+                ) && 0 != (current_node_occupied_bits & (0x01 << target_sectant))
                 {
                     // PUSH
                     let target_child_key =
-                        self.node_children[current_node_key].child(target_sectant) as u32;
+                        self.nodes.get(current_node_key).child(target_sectant) as u32;
                     current_node_key = target_child_key as usize;
                     current_bounds = target_bounds;
                     target_sectant = offset_sectant(
@@ -435,10 +422,10 @@ impl<T: VoxelData> BoxTree<T> {
                             &ray_scale_factors,
                         );
                         target_sectant = step_sectant(target_sectant, step_vec);
-                        if OOB_SECTANT != target_sectant {
+                        if (target_sectant as usize) < BOX_NODE_CHILDREN_COUNT {
                             target_bounds.min_position += step_vec * target_bounds.size;
                         }
-                        if target_sectant == OOB_SECTANT // target is out of bounds
+                        if (target_sectant as usize) >= BOX_NODE_CHILDREN_COUNT // target is out of bounds
                             // current node is occupied at target sectant
                             || 0 != (current_node_occupied_bits & (0x01 << target_sectant))
                         {
@@ -464,7 +451,7 @@ impl<T: VoxelData> BoxTree<T> {
             {
                 offset_sectant(&ray_current_point, self.boxtree_size as f32)
             } else {
-                OOB_SECTANT
+                BOX_NODE_CHILDREN_COUNT as u8
             };
         }
         None

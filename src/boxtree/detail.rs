@@ -1,9 +1,10 @@
 use crate::{
     boxtree::{
-        BOX_NODE_CHILDREN_COUNT, BOX_NODE_DIMENSION, BrickData, V3c, VoxelData,
         types::{
-            Albedo, BoxTree, NodeChildren, NodeContent, PaletteIndexValues, SerializableVoxelData,
+            Albedo, BoxTree, NodeChildren, NodeContent, NodeData, PaletteIndexValues,
+            SerializableVoxelData,
         },
+        BrickData, V3c, VoxelData, BOX_NODE_CHILDREN_COUNT, BOX_NODE_DIMENSION,
     },
     object_pool::empty_marker,
     spatial::{lut::SECTANT_OFFSET_LUT, math::flat_projection},
@@ -122,14 +123,14 @@ impl Zero for Albedo {
 }
 
 //####################################################################################
-//     ███████      █████████  ███████████ ███████████   ██████████ ██████████
-//   ███░░░░░███   ███░░░░░███░█░░░███░░░█░░███░░░░░███ ░░███░░░░░█░░███░░░░░█
-//  ███     ░░███ ███     ░░░ ░   ░███  ░  ░███    ░███  ░███  █ ░  ░███  █ ░
-// ░███      ░███░███             ░███     ░██████████   ░██████    ░██████
-// ░███      ░███░███             ░███     ░███░░░░░███  ░███░░█    ░███░░█
-// ░░███     ███ ░░███     ███    ░███     ░███    ░███  ░███ ░   █ ░███ ░   █
-//  ░░░███████░   ░░█████████     █████    █████   █████ ██████████ ██████████
-//    ░░░░░░░      ░░░░░░░░░     ░░░░░    ░░░░░   ░░░░░ ░░░░░░░░░░ ░░░░░░░░░░
+//  ███████████     ███████    █████ █████ ███████████ ███████████   ██████████ ██████████
+// ░░███░░░░░███  ███░░░░░███ ░░███ ░░███ ░█░░░███░░░█░░███░░░░░███ ░░███░░░░░█░░███░░░░░█
+//  ░███    ░███ ███     ░░███ ░░███ ███  ░   ░███  ░  ░███    ░███  ░███  █ ░  ░███  █ ░
+//  ░██████████ ░███      ░███  ░░█████       ░███     ░██████████   ░██████    ░██████
+//  ░███░░░░░███░███      ░███   ███░███      ░███     ░███░░░░░███  ░███░░█    ░███░░█
+//  ░███    ░███░░███     ███   ███ ░░███     ░███     ░███    ░███  ░███ ░   █ ░███ ░   █
+//  ███████████  ░░░███████░   █████ █████    █████    █████   █████ ██████████ ██████████
+// ░░░░░░░░░░░     ░░░░░░░    ░░░░░ ░░░░░    ░░░░░    ░░░░░   ░░░░░ ░░░░░░░░░░ ░░░░░░░░░░
 //####################################################################################
 impl<T> BoxTree<T>
 where
@@ -141,8 +142,9 @@ where
 
 impl<T: crate::boxtree::VoxelData> BoxTree<T> {
     /// Provides the child key if there is a valid child under the given sectant
+    #[cfg(feature = "bevy_wgpu")]
     pub(crate) fn valid_child_for(&self, node_key: usize, sectant: u8) -> Option<usize> {
-        let child_key = self.node_children[node_key].child(sectant);
+        let child_key = self.nodes.get(node_key).child(sectant);
         if self.nodes.key_is_valid(child_key) {
             Some(child_key)
         } else {
@@ -152,7 +154,7 @@ impl<T: crate::boxtree::VoxelData> BoxTree<T> {
 
     /// Returns with true if Node is empty at the given target sectant
     pub(crate) fn node_empty_at(&self, node_key: usize, target_sectant: u8) -> bool {
-        match self.nodes.get(node_key) {
+        match &self.nodes.get(node_key).content {
             NodeContent::Nothing => true,
             NodeContent::Leaf(bricks) => match &bricks[target_sectant as usize] {
                 BrickData::Empty => true,
@@ -203,20 +205,16 @@ impl<T: crate::boxtree::VoxelData> BoxTree<T> {
                     true
                 }
             },
-            NodeContent::Internal(_occupied_bits) => {
-                debug_assert!(
-                    !matches!(
-                        self.node_children[node_key],
-                        NodeChildren::OccupancyBitmap(_)
-                    ),
-                    "Expected for internal node to not have OccupancyBitmap as assigned child: {:?}",
-                    self.node_children[node_key],
-                );
+            NodeContent::Internal => {
+                let child_key = self.nodes.get(node_key).child(target_sectant);
+
+                if !self.nodes.key_is_valid(child_key) {
+                    return true; // Invalid child counts as empty
+                }
+
+                // Examine the child at every sectant
                 for child_sectant in 0..BOX_NODE_CHILDREN_COUNT {
-                    let child_key = self.node_children[node_key].child(target_sectant);
-                    if self.nodes.key_is_valid(child_key)
-                        && !self.node_empty_at(child_key, child_sectant as u8)
-                    {
+                    if !self.node_empty_at(child_key, child_sectant as u8) {
                         return false;
                     }
                 }
@@ -238,7 +236,8 @@ impl<T: crate::boxtree::VoxelData> BoxTree<T> {
             return self
                 .nodes
                 .get(node_key_left)
-                .compare(self.nodes.get(node_key_right));
+                .content
+                .compare(&self.nodes.get(node_key_right).content);
         }
         true
     }
@@ -247,21 +246,11 @@ impl<T: crate::boxtree::VoxelData> BoxTree<T> {
     /// * `node_key` - The key of the node to subdivide. It must be a leaf
     /// * `target_sectant` - The sectant that must have a child
     pub(crate) fn subdivide_leaf_to_nodes(&mut self, node_key: usize, target_sectant: usize) {
-        // Since the node is expected to be a leaf, by default it is supposed that it is fully occupied
-        let mut node_content = NodeContent::Internal(
-            if let NodeChildren::OccupancyBitmap(occupied_bits) = self.node_children[node_key] {
-                occupied_bits
-            } else {
-                panic!(
-                    "Expected node to have OccupancyBitmap(_), instead of {:?}",
-                    self.node_children[node_key]
-                )
-            },
-        );
-        std::mem::swap(&mut node_content, self.nodes.get_mut(node_key));
+        let mut node_content = NodeContent::Internal;
+        std::mem::swap(&mut node_content, &mut self.nodes.get_mut(node_key).content);
         let mut node_new_children = [empty_marker(); BOX_NODE_CHILDREN_COUNT];
         match node_content {
-            NodeContent::Nothing | NodeContent::Internal(_) => {
+            NodeContent::Nothing | NodeContent::Internal => {
                 panic!("Non-leaf node expected to be Leaf")
             }
             NodeContent::Leaf(mut bricks) => {
@@ -275,39 +264,32 @@ impl<T: crate::boxtree::VoxelData> BoxTree<T> {
                     // Push in a new child even if the brick is empty for the target sectant
                     {
                         // Push in the new(placeholder) child
-                        node_new_children[sectant] = self.nodes.push(NodeContent::Nothing) as u32;
-                        // Potentially Resize node children array to accomodate the new child
-                        self.node_children.resize(
-                            self.node_children
-                                .len()
-                                .max(node_new_children[sectant] as usize + 1),
-                            NodeChildren::default(),
-                        );
-                        self.node_mips
-                            .resize(self.node_mips.len().max(self.nodes.len()), BrickData::Empty);
+                        node_new_children[sectant] = self.nodes.push(NodeData::empty_node()) as u32;
                     }
 
                     match brick {
                         BrickData::Empty => {}
                         BrickData::Solid(voxel) => {
-                            // Set the occupancy bitmap for the new leaf child node
-                            self.node_children[node_new_children[sectant] as usize] =
-                                NodeChildren::OccupancyBitmap(u64::MAX);
-                            *self.nodes.get_mut(node_new_children[sectant] as usize) =
-                                NodeContent::UniformLeaf(BrickData::Solid(voxel));
+                            self.nodes
+                                .get_mut(node_new_children[sectant] as usize)
+                                .occupied_bits = u64::MAX;
+                            self.nodes
+                                .get_mut(node_new_children[sectant] as usize)
+                                .content = NodeContent::UniformLeaf(BrickData::Solid(voxel));
                         }
                         BrickData::Parted(brick) => {
                             // Calculcate the occupancy bitmap for the new leaf child node
                             // As it is a higher resolution, than the current bitmap, it needs to be bruteforced
-                            self.node_children[node_new_children[sectant] as usize] =
-                                NodeChildren::OccupancyBitmap(
-                                    bricks[sectant].calculate_occupied_bits(
-                                        self.brick_dim as usize,
-                                        &self.voxel_color_palette,
-                                        &self.voxel_data_palette,
-                                    ),
-                                );
-                            *self.nodes.get_mut(node_new_children[sectant] as usize) =
+                            self.nodes
+                                .get_mut(node_new_children[sectant] as usize)
+                                .occupied_bits = bricks[sectant].calculate_occupied_bits(
+                                self.brick_dim as usize,
+                                &self.voxel_color_palette,
+                                &self.voxel_data_palette,
+                            );
+                            self.nodes
+                                .get_mut(node_new_children[sectant] as usize)
+                                .content =
                                 NodeContent::UniformLeaf(BrickData::Parted(brick.clone()));
                         }
                     }
@@ -320,32 +302,14 @@ impl<T: crate::boxtree::VoxelData> BoxTree<T> {
                         // Push in an empty leaf child to the target sectant ( that will be populated later )
                         // But nothing else to do, as the Uniform leaf is empty!
                         node_new_children[target_sectant] =
-                            self.nodes.push(NodeContent::Nothing) as u32;
-                        self.node_children.resize(
-                            self.node_children
-                                .len()
-                                .max(node_new_children[target_sectant] as usize + 1),
-                            NodeChildren::default(),
-                        );
-                        self.node_mips
-                            .resize(self.node_mips.len().max(self.nodes.len()), BrickData::Empty);
-                        self.node_children[node_new_children[target_sectant] as usize] =
-                            NodeChildren::OccupancyBitmap(0);
+                            self.nodes.push(NodeData::empty_node()) as u32;
                     }
                     BrickData::Solid(voxel) => {
                         // Push in all solid children for child sectants
                         for new_child in node_new_children.iter_mut().take(BOX_NODE_CHILDREN_COUNT)
                         {
-                            *new_child = self
-                                .nodes
-                                .push(NodeContent::UniformLeaf(BrickData::Solid(voxel)))
-                                as u32;
-                            self.node_children.resize(
-                                self.node_children.len().max(*new_child as usize + 1),
-                                NodeChildren::default(),
-                            );
-                            self.node_children[*new_child as usize] =
-                                NodeChildren::OccupancyBitmap(u64::MAX);
+                            *new_child =
+                                self.nodes.push(NodeData::uniform_solid_node(voxel)) as u32;
                         }
                     }
                     BrickData::Parted(brick) => {
@@ -359,32 +323,17 @@ impl<T: crate::boxtree::VoxelData> BoxTree<T> {
                                 &self.voxel_color_palette,
                                 &self.voxel_data_palette,
                             );
-                            node_new_children[sectant] = self
-                                .nodes
-                                .push(NodeContent::UniformLeaf(BrickData::Parted(new_brick)))
-                                as u32;
-
-                            // Potentially Resize node children array to accomodate the new child
-                            self.node_children.resize(
-                                self.node_children
-                                    .len()
-                                    .max(node_new_children[sectant] as usize + 1),
-                                NodeChildren::default(),
-                            );
-                            self.node_mips.resize(
-                                self.node_mips.len().max(self.nodes.len()),
-                                BrickData::Empty,
-                            );
-
-                            // Set the occupancy bitmap for the new leaf child node
-                            self.node_children[node_new_children[sectant] as usize] =
-                                NodeChildren::OccupancyBitmap(child_occupied_bits);
+                            node_new_children[sectant] =
+                                self.nodes.push(NodeData::uniform_parted_node(
+                                    BrickData::Parted(new_brick),
+                                    child_occupied_bits,
+                                )) as u32;
                         }
                     }
                 }
             }
         }
-        self.node_children[node_key] = NodeChildren::Children(node_new_children);
+        self.nodes.get_mut(node_key).children = NodeChildren::Children(node_new_children);
     }
 
     /// Tries to create a brick from the given node if possible. WARNING: Data loss may occur
@@ -392,80 +341,30 @@ impl<T: crate::boxtree::VoxelData> BoxTree<T> {
         if !self.nodes.key_is_valid(node_key) {
             return BrickData::Empty;
         }
-        match self.nodes.get(node_key) {
-            NodeContent::Nothing | NodeContent::Internal(_) | NodeContent::Leaf(_) => {
-                BrickData::Empty
-            }
+        match &self.nodes.get(node_key).content {
+            NodeContent::Nothing | NodeContent::Internal | NodeContent::Leaf(_) => BrickData::Empty,
 
             NodeContent::UniformLeaf(brick) => brick.clone(),
         }
     }
 
     /// Erase all children of the node under the given key, and set its children to "No children"
-    pub(crate) fn deallocate_children_of(&mut self, node: usize) {
-        if !self.nodes.key_is_valid(node) {
+    pub(crate) fn deallocate_children_of(&mut self, node_key: usize) {
+        if !self.nodes.key_is_valid(node_key) {
             return;
         }
         let mut to_deallocate = Vec::new();
-        if let Some(children) = self.node_children[node].iter() {
+        if let Some(children) = self.nodes.get(node_key).children_iter() {
             for child in children {
                 if self.nodes.key_is_valid(*child as usize) {
                     to_deallocate.push(*child as usize);
                 }
             }
-            for child in to_deallocate {
-                self.deallocate_children_of(child); // Recursion should be fine as depth is not expceted to be more, than 32
-                self.nodes.free(child);
-                self.node_children[child] = NodeChildren::NoChildren;
-            }
-        }
-    }
+            for child_key in to_deallocate {
+                debug_assert_ne!(child_key, node_key, "Node referring to itself as child");
 
-    /// Calculates the occupied bits of a Node; For empty nodes(Nodecontent::Nothing) as well;
-    /// As they might be empty by fault and to correct them the occupied bits is required.
-    pub(crate) fn stored_occupied_bits(&self, node_key: usize) -> u64 {
-        match self.nodes.get(node_key) {
-            NodeContent::Leaf(_) | NodeContent::UniformLeaf(_) => {
-                match self.node_children[node_key] {
-                    NodeChildren::OccupancyBitmap(occupied_bits) => occupied_bits,
-                    NodeChildren::NoChildren => 0,
-                    NodeChildren::Children(children) => {
-                        debug_assert!(
-                            false,
-                            "Expected node[{node_key}] to not have children.\nnode:{:?}\nchildren: {:?}",
-                            self.nodes.get(node_key),
-                            children
-                        );
-                        0
-                    }
-                }
-            }
-            NodeContent::Nothing => 0,
-            NodeContent::Internal(occupied_bits) => *occupied_bits,
-        }
-    }
-
-    /// Stores the given occupied bits for the given node based on key
-    pub(crate) fn store_occupied_bits(&mut self, node_key: usize, new_occupied_bits: u64) {
-        match self.nodes.get_mut(node_key) {
-            NodeContent::Internal(occupied_bits) => *occupied_bits = new_occupied_bits,
-            NodeContent::Nothing => {
-                self.node_children[node_key] = NodeChildren::OccupancyBitmap(new_occupied_bits)
-            }
-            NodeContent::Leaf(_) | NodeContent::UniformLeaf(_) => {
-                match self.node_children[node_key] {
-                    NodeChildren::NoChildren => {
-                        self.node_children[node_key] =
-                            NodeChildren::OccupancyBitmap(new_occupied_bits)
-                    }
-                    NodeChildren::OccupancyBitmap(ref mut occupied_bits) => {
-                        *occupied_bits = new_occupied_bits;
-                    }
-                    NodeChildren::Children(_) => panic!(
-                        "Expected Leaf node to have OccupancyBitmap instead of {:?}",
-                        self.node_children[node_key]
-                    ),
-                }
+                self.deallocate_children_of(child_key); // Recursion should be fine as depth is not expceted to be more, than 32
+                self.nodes.free(child_key);
             }
         }
     }

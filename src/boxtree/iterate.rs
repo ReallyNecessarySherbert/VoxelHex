@@ -1,10 +1,19 @@
 use crate::{
     boxtree::{
-        types::NodeContent, Albedo, BoxTree, MIPResamplingMethods, VoxelData, BOX_NODE_DIMENSION,
+        types::{BoxTreeNodeAccessStack, NodeContent},
+        Albedo, BoxTree, MIPResamplingMethods, VoxelData, BOX_NODE_CHILDREN_COUNT,
+        BOX_NODE_DIMENSION,
     },
-    spatial::{math::vector::V3c, Cube},
+    spatial::{
+        math::vector::{V3c, V3cf32},
+        raytracing::step_sectant,
+        Cube,
+    },
 };
-use std::collections::HashMap;
+use std::{
+    collections::{HashMap, VecDeque},
+    hash::Hash,
+};
 
 pub(crate) trait MIPResamplingFunction {
     /// Provides a color value from the given range acquired from the sampling function
@@ -114,6 +123,175 @@ pub(crate) fn execute_for_relevant_sectants<F: FnMut(V3c<u32>, V3c<u32>, u8, &Cu
 
 impl<T: VoxelData> BoxTree<T>
 {
+    /// Provides the path to the given node from the root node
+    pub(crate) fn get_access_stack_for(
+        &self,
+        node_key: usize,
+        node_position: V3cf32,
+    ) -> BoxTreeNodeAccessStack {
+        let mut current_bounds = Cube::root_bounds(self.boxtree_size as f32);
+        let mut node_stack = vec![(
+            Self::ROOT_NODE_KEY as usize,
+            current_bounds.sectant_for(&node_position),
+        )];
+        loop {
+            let (current_node_key, current_sectant) = node_stack.last().unwrap();
+            if *current_node_key == node_key {
+                return node_stack;
+            }
+
+            match self.nodes.get(*current_node_key).content {
+                NodeContent::Nothing => {
+                    unreachable!("Access stack for node landed on empty parent node")
+                }
+                NodeContent::Leaf(_) => {
+                    unreachable!("Access stack for node landed on leaf parent node")
+                }
+                NodeContent::UniformLeaf(_) => {
+                    unreachable!("Access stack for node landed on uniform leaf parent node")
+                }
+                NodeContent::Internal => {
+                    // Hash the position to the target child
+                    let child_at_position =
+                        self.nodes.get(*current_node_key).child(*current_sectant);
+
+                    // There is a valid child at the given position inside the node, recurse into it
+                    if self.nodes.key_is_valid(child_at_position) {
+                        current_bounds = current_bounds.child_bounds_for(*current_sectant);
+                        node_stack.push((
+                            child_at_position,
+                            current_bounds.sectant_for(&node_position),
+                        ));
+                    } else {
+                        unreachable!("Access stack for node landed on invalid parent node");
+                    }
+                }
+            }
+        }
+    }
+
+    /// Provides the sibling of the given node in the given direction, if it exists and not ambigous
+    /// It might return with a leaf node on a higher level, than the given node
+    pub(crate) fn get_sibling_by_position(
+        &self,
+        node_key: usize,
+        direction: V3c<f32>,
+        node_position: &V3cf32,
+    ) -> Option<(usize, u8)> {
+        let node_stack = self.get_access_stack_for(node_key, *node_position);
+        self.get_sibling_by_stack(direction, &node_stack)
+    }
+
+    /// Provides the sibling of the given node in the given direction, if it exists and not ambigous
+    /// It might return with a leaf node on a higher level, than the given node
+    /// It uses the given node_stack, which is re-usable for nodes
+    pub(crate) fn get_sibling_by_stack(
+        &self,
+        direction: V3c<f32>,
+        node_stack: &[(usize, u8)],
+    ) -> Option<(usize, u8)> {
+        let mut current_sectant = node_stack
+            .last()
+            .expect("Expected given node_stack to contain entries!")
+            .1;
+        let mut next_sectant = step_sectant(current_sectant, direction);
+        let mut node_stack = node_stack.to_vec();
+        let mut mirror_stack = VecDeque::<u8>::new();
+        let mut uniform_leaf_sibling_sectant = None;
+        // On the bottom of the access stack there may be a uniform leaf
+        // If current node is a uniform leaf, step to sibling node at the same level
+        // This is needed because uniform leaf nodes have no children,
+        // and sectants are not differentiated within.
+        if !node_stack.is_empty()
+            && matches!(
+                self.nodes.get(node_stack.last().unwrap().0).content,
+                NodeContent::UniformLeaf(_)
+            )
+        {
+            let (_node_key, mut target_sectant) = node_stack.pop().unwrap();
+
+            while (target_sectant as usize) < BOX_NODE_CHILDREN_COUNT {
+                target_sectant = step_sectant(target_sectant, direction);
+            }
+            uniform_leaf_sibling_sectant = Some(target_sectant - BOX_NODE_CHILDREN_COUNT as u8);
+
+            if let Some((_parent_key, parent_sectant)) = node_stack.last_mut() {
+                next_sectant = step_sectant(*parent_sectant, direction);
+            }
+        }
+
+        // Collect sibling sectants on each level
+        while !node_stack.is_empty() && (next_sectant as usize) >= BOX_NODE_CHILDREN_COUNT {
+            // At this point the sibling child is out of node bounds
+            // while a common parent may still exist in the hierarchy ( node stack is not empty )
+
+            // convert the sibling sectant to internal, and store it
+            let mirror_sectant = next_sectant - BOX_NODE_CHILDREN_COUNT as u8;
+            mirror_stack.push_front(mirror_sectant);
+
+            // go up a level, and step the parent sectant in the given direction
+            if let Some((parent_key, parent_sectant)) = node_stack.pop() {
+                current_sectant = parent_sectant;
+                next_sectant = step_sectant(current_sectant, direction);
+
+                if (next_sectant as usize) < BOX_NODE_CHILDREN_COUNT {
+                    node_stack.push((parent_key, next_sectant));
+                }
+            }
+        }
+
+        // even the root node pushed out of bounds
+        // there is no sibling in that direction!
+        if node_stack.is_empty() {
+            return None;
+        }
+
+        // Adding the internal sibling sectant to the mirror stack
+        // So the front of the mirror stack lines up with
+        // the end of the node_stack
+        mirror_stack.push_front(next_sectant);
+
+        // In case Uniform nodes, the node at the same level is provided
+        // in case there is a valid sibling node
+        if let Some(sibling_sectant) = uniform_leaf_sibling_sectant {
+            let sibling_node = self
+                .nodes
+                .get(node_stack.last().unwrap().0)
+                .child(next_sectant);
+            if self.nodes.key_is_valid(sibling_node) {
+                return Some((sibling_node, sibling_sectant));
+            }
+            return None;
+        }
+
+        // starting from the last node in the original stack
+        // traverse down the mirror stack to the desired node level
+        let mut node_key = node_stack.last().unwrap().0;
+        for target_sectant in mirror_stack.iter() {
+            let child_at_position = self.nodes.get(node_key).child(*target_sectant);
+            if self.nodes.key_is_valid(child_at_position) {
+                node_key = child_at_position;
+                next_sectant = *target_sectant;
+            } else if matches!(self.nodes.get(node_key).content, NodeContent::Leaf(_)) {
+                // leaf nodes don't have valid node children, but sectant can still have valid siblings
+                return Some((node_key, *target_sectant));
+            } else if matches!(
+                self.nodes.get(node_key).content,
+                NodeContent::UniformLeaf(_)
+            ) {
+                // leaf nodes above the hierarchy next to original node count as siblings
+                // even if the opposite is not true
+                return Some((node_key, BOX_NODE_CHILDREN_COUNT as u8));
+            } else {
+                // Node inside sibling hierarchy is invalid
+                return None;
+            }
+        }
+
+        Some((node_key, next_sectant))
+    }
+
+    /// Provides the key of the child node at the given position on the lowest level inside the given parent node
     pub(crate) fn get_node_internal(
         &self,
         mut current_node_key: usize,
@@ -126,29 +304,34 @@ impl<T: VoxelData> BoxTree<T>
         );
 
         loop {
-            match self.nodes.get(current_node_key) {
+            match self.nodes.get(current_node_key).content {
                 NodeContent::Nothing | NodeContent::Leaf(_) | NodeContent::UniformLeaf(_) => {
+                    // Check if uniform leaf has matching occupied bits
                     return Some(current_node_key);
                 }
-                NodeContent::Internal(occupied_bits) => {
+                NodeContent::Internal => {
                     // Hash the position to the target child
                     let child_sectant_at_position = node_bounds.sectant_for(position);
-                    let child_at_position =
-                        self.node_children[current_node_key].child(child_sectant_at_position);
+                    let child_at_position = self
+                        .nodes
+                        .get(current_node_key)
+                        .child(child_sectant_at_position);
 
                     // There is a valid child at the given position inside the node, recurse into it
                     if self.nodes.key_is_valid(child_at_position) {
                         debug_assert_ne!(
                             0,
-                            occupied_bits & (0x01 << child_sectant_at_position),
-                            "Node[{:?}] under {:?} \n has a child(node[{:?}]) in sectant[{:?}](global position: {:?}), which is incompatible with the occupancy bitmap: {:#10X}; \n child node: {:?}; child node children: {:?};",
+                            self
+                        .nodes
+                        .get(current_node_key).occupied_bits & (0x01 << child_sectant_at_position),
+                            "Node[{:?}] under {:?} \n has a child in sectant[{:?}](global position: {:?}), which is incompatible with the occupancy bitmap: {:#10X}; \n child node: {:?}; child node children: {:?};",
                             current_node_key,
                             node_bounds,
-                            self.node_children[current_node_key].child(child_sectant_at_position),
                             child_sectant_at_position,
-                            position, occupied_bits,
-                            self.nodes.get(self.node_children[current_node_key].child(child_sectant_at_position)),
-                            self.node_children[self.node_children[current_node_key].child(child_sectant_at_position)]
+                            position,
+                            self.nodes.get(current_node_key).occupied_bits,
+                            self.nodes.get(child_at_position),
+                            child_at_position,
                         );
                         current_node_key = child_at_position;
                         *node_bounds =

@@ -8,8 +8,8 @@ mod tests;
 
 #[derive(Debug)]
 pub struct Ray {
-    pub origin: V3c<f32>,
-    pub direction: V3c<f32>,
+    pub origin: V3cf32,
+    pub direction: V3cf32,
 }
 
 impl Ray {
@@ -17,7 +17,7 @@ impl Ray {
         (1. - self.direction.length()).abs() < 0.000001
     }
 
-    pub fn point_at(&self, d: f32) -> V3c<f32> {
+    pub fn point_at(&self, d: f32) -> V3cf32 {
         self.origin + self.direction * d
     }
 }
@@ -62,16 +62,17 @@ impl Cube {
         })
     }
 
+    #[cfg(feature = "bevy_wgpu")]
     pub(crate) fn brick_slot_for(position: &V3cf32, brick_dim: u32) -> Cube {
         Cube {
-            min_position: *position - (*position % brick_dim as f32),
+            min_position: *position - *(*position % brick_dim as f32).abs(),
             size: brick_dim as f32,
         }
     }
 }
 
 /// Provides the resulting sectant based on the given sectant
-/// It returns with OOB_SECTANT if the result is out of bounds.
+/// Returns with a value larger than `BOX_NODE_CHILDREN_COUNT - 1` when out of bounds.
 /// Important note: the specs of `signum` behvaes differently for f32 and i32
 /// So the conversion to i32 is absolutely required
 pub(crate) const fn step_sectant(sectant: u8, step: V3c<f32>) -> u8 {

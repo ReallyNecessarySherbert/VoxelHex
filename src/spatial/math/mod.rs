@@ -20,8 +20,8 @@ pub(crate) const fn flat_projection(x: usize, y: usize, z: usize, size: usize) -
     x + (y * size) + (z * size * size)
 }
 
+/// Assigns an index for each sectant, so every child cell can be indexed in a well defined manner
 /// Each Node is separated to 64 sectants based on their relative position inside the Nodes occupying space.
-/// The hash function assigns an index for each sectant, so every child cell can be indexed in a well defined manner
 /// * `offset` - From range 0..size in each dimensions
 /// * `size` - Size of the region to check for child sectants
 pub(crate) fn offset_sectant(offset: &V3c<f32>, size: f32) -> u8 {
@@ -32,8 +32,7 @@ pub(crate) fn offset_sectant(offset: &V3c<f32>, size: f32) -> u8 {
             && offset.x >= (-FLOAT_ERROR_TOLERANCE)
             && offset.y >= (-FLOAT_ERROR_TOLERANCE)
             && offset.z >= (-FLOAT_ERROR_TOLERANCE),
-        "Expected relative offset {:?} to be inside {size}^3",
-        offset
+        "Expected relative offset {offset:?} to be inside {size}^3"
     );
     // Scale to 0..BOX_NODE_CHILDREN_COUNT, then project to an unique index
     let index = (*offset * BOX_NODE_DIMENSION as f32 / size).floor();
@@ -75,9 +74,7 @@ pub(crate) fn matrix_index_for(
             && bounds.min_position.x + bounds.size > position.x as f32
             && bounds.min_position.y + bounds.size > position.y as f32
             && bounds.min_position.z + bounds.size > position.z as f32,
-        "Position {:?} not inside bounds {:?}",
-        position,
-        bounds
+        "Position {position:?} not inside bounds {bounds:?}"
     );
 
     // --> In case the smallest possible node the contained matrix of voxels

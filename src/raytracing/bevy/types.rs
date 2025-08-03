@@ -1,5 +1,6 @@
 use crate::{
-    boxtree::{BoxTree, V3c, V3cf32, VoxelData, types::PaletteIndexValues},
+    boxtree::{types::BoxTreeUpdatedSignalParams, BoxTree, V3cf32, VoxelData},
+    raytracing::bevy::streaming::types::BoxTreeGPUDataHandler,
     spatial::Cube,
 };
 use bevy::{
@@ -17,9 +18,8 @@ use bevy::{
         renderer::RenderQueue,
     },
 };
-use bimap::BiHashMap;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::VecDeque,
     hash::Hash,
     sync::{Arc, RwLock},
 };
@@ -85,19 +85,30 @@ pub struct Viewport {
     pub inverse_view_projection_matrix: bevy::math::Mat4,
 }
 
+/// Represents a BoxTree hosted within the library as it is streamed to the GPU
 #[derive(Resource, Clone, TypePath, ExtractResource)]
 #[type_path = "shocovox::gpu::OctreeGPUHost"]
 pub struct BoxTreeGPUHost<T = u32>
 where
     T: Default + Clone + Eq + VoxelData + Send + Sync + Hash + 'static,
 {
-    pub tree: BoxTree<T>,
+    /// The BoxTree hosted within the bevy library
+    pub tree: Arc<RwLock<BoxTree<T>>>,
+
+    /// Updates made to the tree are collected in this buffer
+    /// Changes made to nodes within the tree will automatically include them into
+    pub(crate) changes_buffer: Arc<RwLock<VecDeque<BoxTreeUpdatedSignalParams>>>,
 }
 
+/// Container for all the views rendered by the library instance
 #[derive(Debug, Resource, Clone, TypePath)]
 #[type_path = "shocovox::gpu::VhxViewSet"]
 pub struct VhxViewSet {
+    /// dirty bit which is being set for large changes
+    /// e.g. new output textures need to be generated
     pub(crate) changed: bool,
+
+    /// Thread safe container for the contained views currently rendered
     pub(crate) views: Vec<Arc<RwLock<BoxTreeGPUView>>>,
 }
 
@@ -118,7 +129,7 @@ pub struct BoxTreeSpyGlass {
 }
 
 /// A View of an Octree
-#[derive(Debug, Resource, Clone)]
+#[derive(Debug, Resource)]
 pub struct BoxTreeGPUView {
     /// Buffers, layouts and bind groups for the view
     pub(crate) resources: Option<BoxTreeRenderDataResources>,
@@ -156,105 +167,6 @@ pub struct BoxTreeGPUView {
     pub(crate) brick_slot: Cube,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) enum BrickOwnedBy {
-    None,
-    NodeAsChild(u32, u8),
-    NodeAsMIP(u32),
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct NodeUploadRequest {
-    pub(crate) node_key: usize,
-    pub(crate) parent_key: usize,
-    pub(crate) sectant: u8,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct BrickUploadRequest {
-    pub(crate) ownership: BrickOwnedBy,
-    pub(crate) min_position: V3cf32,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct UploadQueueTargets {
-    /// The nodes to upload to the GPU in ascending sorted order.
-    /// This is a complete list of all the nodes required to be on the GPU.
-    pub(crate) node_upload_queue: Vec<NodeUploadRequest>,
-
-    /// This is a list of the bricks to upload to the GPU (bricks not yet uploaded)
-    pub(crate) brick_upload_queue: Vec<BrickUploadRequest>,
-
-    /// Map to connect brick indexes in GPU data to their counterparts in the tree
-    pub(crate) brick_ownership: BiHashMap<usize, BrickOwnedBy>,
-
-    /// Centerpoint of each brick; Valid only if the brick is owned!
-    pub(crate) brick_positions: Vec<V3c<f32>>,
-
-    /// Map to connect tree node keys to node meta indexes
-    pub(crate) node_key_vs_meta_index: BiHashMap<usize, usize>,
-
-    /// Map to connect nodes index values inside the GPU to their parents
-    /// Mapping is as following: node_index -> (parent_index, child_sectant)
-    pub(crate) node_index_vs_parent: HashMap<usize, (usize, u8)>,
-
-    /// A set containing all nodes which should be on the GPU
-    pub(crate) nodes_to_see: HashSet<usize>,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct UploadQueueStatus {
-    /// The number of nodes already uploaded into the GPU
-    /// from @node_upload_queue
-    pub(crate) node_upload_progress: usize,
-
-    /// The number of bricks already uploaded into the GPU
-    /// from @node_upload_queue
-    pub(crate) brick_upload_progress: usize,
-
-    /// Index pointing inside GPU data where the search will start
-    /// for the next brick to be overwritten
-    pub(crate) victim_brick: usize,
-
-    /// Index pointing inside GPU data where the search will start
-    /// for the next node to be overwritten
-    pub(crate) victim_node: usize,
-
-    /// The number of colors uploaded to the GPU
-    pub(crate) uploaded_color_palette_size: usize,
-}
-
-#[derive(Debug, Resource, Clone)]
-pub struct BoxTreeGPUDataHandler {
-    /// Tells the handler how many nodes to upload in one frame
-    pub node_uploads_per_frame: usize,
-
-    /// Tells the handler how many bricks to upload in one frame
-    pub brick_uploads_per_frame: usize,
-
-    /// Tells the handler how far away to look for bricks to find
-    /// the furthest to unload
-    pub brick_unload_search_perimeter: usize,
-
-    /// The capacity for nodes within the view
-    pub(crate) nodes_in_view: usize,
-
-    /// The capacity for bricks within the view
-    pub(crate) bricks_in_view: usize,
-
-    /// The area on which node and brick upload is based on
-    pub(crate) upload_range: Cube,
-
-    /// The data the GPU displays
-    pub(crate) render_data: BoxTreeRenderData,
-
-    /// Target and progress data for GPU uploads
-    pub(crate) upload_targets: UploadQueueTargets,
-
-    /// Target and progress data for GPU uploads
-    pub(crate) upload_state: UploadQueueStatus,
-}
-
 #[derive(Debug, Clone)]
 pub(crate) struct BoxTreeRenderDataResources {
     pub(crate) render_stage_prepass_bind_group: BindGroup,
@@ -284,26 +196,6 @@ pub(crate) struct BoxTreeRenderDataResources {
     pub(crate) voxels_buffer: Buffer,
     pub(crate) color_palette_buffer: Buffer,
     // }--
-}
-
-/// An update to a single brick inside the GPU cache in a view
-#[derive(Default)]
-pub(crate) struct BrickUpdate<'a> {
-    pub(crate) brick_index: usize,
-    pub(crate) data: &'a [PaletteIndexValues],
-}
-
-/// An update generated by a request to insert a node, brick or MIP
-#[derive(Default)]
-pub(crate) struct CacheUpdatePackage<'a> {
-    /// true if the view needs a resize
-    pub(crate) allocation_failed: bool,
-
-    /// The bricks updated during the request
-    pub(crate) brick_update: Option<BrickUpdate<'a>>,
-
-    /// The list of modified nodes during the operation
-    pub(crate) modified_nodes: Vec<usize>,
 }
 
 #[derive(Debug, Clone, TypePath)]

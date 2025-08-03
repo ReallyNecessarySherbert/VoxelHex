@@ -18,11 +18,11 @@ pub use types::{
 };
 
 use crate::{
-    boxtree::types::{BrickData, NodeChildren, NodeContent, OctreeError, PaletteIndexValues},
-    object_pool::{ObjectPool, empty_marker},
+    boxtree::types::{BrickData, NodeContent, NodeData, OctreeError, PaletteIndexValues},
+    object_pool::{empty_marker, ObjectPool},
     spatial::{
-        Cube,
         math::{flat_projection, matrix_index_for},
+        Cube,
     },
 };
 use std::{collections::HashMap, path::Path};
@@ -120,7 +120,6 @@ impl<'a, T: VoxelData> BoxTreeEntry<'a, T> {
 //  ███████████  ░░░███████░   █████ █████    █████    █████   █████ ██████████ ██████████
 // ░░░░░░░░░░░     ░░░░░░░    ░░░░░ ░░░░░    ░░░░░    ░░░░░   ░░░░░ ░░░░░░░░░░ ░░░░░░░░░░
 //####################################################################################
-pub(crate) const OOB_SECTANT: u8 = 64;
 pub(crate) const BOX_NODE_DIMENSION: usize = 4;
 pub(crate) const BOX_NODE_CHILDREN_COUNT: usize = 64;
 
@@ -128,19 +127,19 @@ pub(crate) const BOX_NODE_CHILDREN_COUNT: usize = 64;
 #[macro_export]
 macro_rules! make_tree {
     ($size:expr) => {
-        Boxtree::<u32>::new($size, 32)
+        Boxtree::<u32>::new($size, 32).expect("Boxtree creation error")
     };
 
     ($size:expr, $brick_dim:expr) => {
-        Boxtree::<u32>::new($size, $brick_dim)
+        BoxTree::<u32>::new($size, $brick_dim).expect("Boxtree creation error")
     };
 
     (<$type:ty>, $size:expr) => {
-        Boxtree::<$type>::new($size, 32)
+        BoxTree::<$type>::new($size, 32)
     };
 
     (<$type:ty>, $size:expr, $brick_dim:expr) => {
-        Boxtree::<$type>::new($size, $brick_dim)
+        Boxtree::<$type>::new($size, $brick_dim).expect("Boxtree creation error")
     };
 }
 
@@ -203,20 +202,19 @@ impl<T: VoxelData> BoxTree<T> {
         }
         let node_count_estimation = (size / brick_dimension).pow(3);
         let mut nodes = ObjectPool::with_capacity(node_count_estimation.min(1024) as usize);
-        let root_node_key = nodes.push(NodeContent::Nothing); // The first element is the root Node
+        let root_node_key = nodes.push(NodeData::empty_node()); // The first element is the root Node
         assert!(root_node_key == 0);
         Ok(Self {
             auto_simplify: true,
             boxtree_size: size,
             brick_dim: brick_dimension,
             nodes,
-            node_children: vec![NodeChildren::default()],
-            node_mips: vec![BrickData::Empty],
             voxel_color_palette: vec![],
             voxel_data_palette: vec![],
             map_to_color_index_in_palette: HashMap::new(),
             map_to_data_index_in_palette: HashMap::new(),
             mip_map_strategy: MIPMapStrategy::default(),
+            update_triggers: vec![],
         })
     }
 
@@ -263,7 +261,7 @@ impl<T: VoxelData> BoxTree<T> {
             return empty_marker();
         };
 
-        match self.nodes.get(current_node_key) {
+        match &self.nodes.get(current_node_key).content {
             NodeContent::Nothing => empty_marker(),
             NodeContent::Leaf(bricks) => {
                 // In case brick_dimension == boxtree size, the root node can not be a leaf...
@@ -311,10 +309,17 @@ impl<T: VoxelData> BoxTree<T> {
                 }
                 BrickData::Solid(voxel) => *voxel,
             },
-            NodeContent::Internal(_occupied_bits) => {
+            NodeContent::Internal => {
                 // Deepest child at given position is empty
                 empty_marker()
             }
         }
+    }
+
+    /// Calculates the maximum MIP level of the tree instance
+    pub(crate) fn max_mip_level(&self) -> u32 {
+        (self.boxtree_size as f32 / self.brick_dim as f32)
+            .log(4.)
+            .ceil() as u32
     }
 }

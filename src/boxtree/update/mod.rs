@@ -152,7 +152,7 @@ impl<T: VoxelData> BoxTree<T>
     ) -> bool {
         // Update the leaf node, if it is possible as is, and if it's even needed to update
         // and decide if the node content needs to be divided into bricks, and the update function to be called again
-        match self.nodes.get_mut(node_key) {
+        match &mut self.nodes.get_mut(node_key).content {
             NodeContent::Leaf(bricks) => {
                 // In case brick_dimension == boxtree size, the 0 can not be a leaf...
                 debug_assert!(self.brick_dim < self.boxtree_size);
@@ -230,10 +230,10 @@ impl<T: VoxelData> BoxTree<T>
                 match mat {
                     BrickData::Empty => {
                         debug_assert_eq!(
-                            self.node_children[node_key],
-                            NodeChildren::OccupancyBitmap(0),
-                            "Expected Node OccupancyBitmap(0) for empty leaf node instead of {:?}",
-                            self.node_children[node_key]
+                            self.nodes.get(node_key).occupied_bits,
+                            0,
+                            "Expected Node OccupancyBitmap 0 for empty leaf node instead of {:?}",
+                            self.nodes.get(node_key).occupied_bits
                         );
                         if !NodeContent::pix_points_to_empty(
                             &target_content,
@@ -261,27 +261,12 @@ impl<T: VoxelData> BoxTree<T>
                                 &target_content,
                             );
                             new_leaf_content[target_child_sectant] = BrickData::Parted(new_brick);
-                            *self.nodes.get_mut(node_key) = NodeContent::Leaf(new_leaf_content);
+                            self.nodes.get_mut(node_key).content =
+                                NodeContent::Leaf(new_leaf_content);
                             return true;
                         }
                     }
                     BrickData::Solid(voxel) => {
-                        debug_assert!(
-                            !NodeContent::pix_points_to_empty(voxel, &self.voxel_color_palette, &self.voxel_data_palette)
-                                && (self.node_children[node_key]
-                                    == NodeChildren::OccupancyBitmap(u64::MAX))
-                                || NodeContent::pix_points_to_empty(voxel, &self.voxel_color_palette, &self.voxel_data_palette)
-                                    && (self.node_children[node_key]
-                                        == NodeChildren::OccupancyBitmap(0)),
-                            "Expected Node occupancy bitmap({:?}) to align for Solid Voxel Brick in Uniform Leaf, which is {}",
-                            self.node_children[node_key],
-                            if NodeContent::pix_points_to_empty(voxel, &self.voxel_color_palette, &self.voxel_data_palette) {
-                                "empty"
-                            } else {
-                                "not empty"
-                            }
-                        );
-
                         // In case the data request doesn't match node content, it needs to be subdivided
                         if NodeContent::pix_points_to_empty(
                             &target_content,
@@ -294,7 +279,7 @@ impl<T: VoxelData> BoxTree<T>
                         ) {
                             // Data request is to clear, it aligns with the voxel content,
                             // it's enough to update the node content in this case
-                            *self.nodes.get_mut(node_key) = NodeContent::Nothing;
+                            self.nodes.get_mut(node_key).content = NodeContent::Nothing;
                             return false;
                         }
 
@@ -415,7 +400,7 @@ impl<T: VoxelData> BoxTree<T>
                             leaf_data[sectant] = BrickData::Parted(new_brick);
                         }
 
-                        *self.nodes.get_mut(node_key) = NodeContent::Leaf(leaf_data);
+                        self.nodes.get_mut(node_key).content = NodeContent::Leaf(leaf_data);
                         debug_assert!(updated, "Expected Leaf node to be updated in operation");
                         return updated;
                     }
@@ -428,15 +413,13 @@ impl<T: VoxelData> BoxTree<T>
                     target_content,
                 )
             }
-            NodeContent::Internal(ocbits) => {
+            NodeContent::Internal => {
                 // Warning: Calling leaf update to an internal node might induce data loss - see #69
-                self.node_children[node_key] = NodeChildren::OccupancyBitmap(*ocbits);
-                *self.nodes.get_mut(node_key) = NodeContent::Leaf(
+                self.nodes.get_mut(node_key).children = NodeChildren::NoChildren;
+                self.nodes.get_mut(node_key).content = NodeContent::Leaf(
                     (0..BOX_NODE_CHILDREN_COUNT)
                         .map(|sectant| {
-                            self.try_brick_from_node(
-                                self.node_children[node_key].child(sectant as u8),
-                            )
+                            self.try_brick_from_node(self.nodes.get(node_key).child(sectant as u8))
                         })
                         .collect::<Vec<_>>()
                         .try_into()
@@ -455,12 +438,10 @@ impl<T: VoxelData> BoxTree<T>
                 // Calling leaf update on Nothing is an odd thing to do..
                 // But possible, if this call is mid-update
                 // So let's try to gather all the information possible
-                *self.nodes.get_mut(node_key) = NodeContent::Leaf(
+                self.nodes.get_mut(node_key).content = NodeContent::Leaf(
                     (0..BOX_NODE_CHILDREN_COUNT)
                         .map(|sectant| {
-                            self.try_brick_from_node(
-                                self.node_children[node_key].child(sectant as u8),
-                            )
+                            self.try_brick_from_node(self.nodes.get(node_key).child(sectant as u8))
                         })
                         .collect::<Vec<_>>()
                         .try_into()
@@ -587,16 +568,11 @@ impl<T: VoxelData> BoxTree<T>
     ) {
         debug_assert!(
             brick_bounds.contains(&(position.into())),
-            "Expected position {:?} to be contained in brick bounds {:?}",
-            position,
-            brick_bounds
+            "Expected position {position:?} to be contained in brick bounds {brick_bounds:?}"
         );
         debug_assert!(
             brick_bounds.contains(&V3c::from(position + size - V3c::unit(1))),
-            "Expected position {:?} and update_size {:?} to be contained in brick bounds {:?}",
-            position,
-            size,
-            brick_bounds
+            "Expected position {position:?} and update_size {size:?} to be contained in brick bounds {brick_bounds:?}"
         );
 
         let mat_index = matrix_index_for(brick_bounds, &position, brick_dim);
@@ -638,132 +614,64 @@ impl<T: VoxelData> BoxTree<T>
         if self.nodes.key_is_valid(node_key) {
             #[cfg(debug_assertions)]
             {
-                if let NodeContent::Internal(ocbits) = self.nodes.get(node_key) {
+                if matches!(self.nodes.get(node_key).content, NodeContent::Internal)
+                    && !matches!(self.nodes.get(node_key).children, NodeChildren::NoChildren)
+                {
                     for sectant in 0..BOX_NODE_CHILDREN_COUNT as u8 {
                         if self.node_empty_at(node_key, sectant) {
                             debug_assert_eq!(
                                 0,
-                                *ocbits & (0x01 << sectant),
+                                self.nodes.get(node_key).occupied_bits & (0x01 << sectant),
                                 "Expected node[{:?}] ocbits({:#10X}) to represent child at sectant[{:?}]: \n{:?}",
-                                node_key, ocbits, sectant,
-                                self.nodes.get(self.node_children[node_key].child(sectant))
+                                node_key, self.nodes.get(node_key).occupied_bits, sectant,
+                                self.nodes.get(self.nodes.get(node_key).child(sectant))
                             )
                         }
                     }
                 }
             }
 
-            match self.nodes.get_mut(node_key) {
+            match &mut self.nodes.get_mut(node_key).content {
                 NodeContent::Nothing => true,
-                NodeContent::UniformLeaf(brick) => {
-                    debug_assert!(
-                        matches!(
-                            self.node_children[node_key],
-                            NodeChildren::OccupancyBitmap(_)
-                        ),
-                        "Uniform leaf has {:?} instead of an Occupancy_bitmap(_)",
-                        self.node_children[node_key]
-                    );
-                    match brick {
-                        BrickData::Empty => true,
-                        BrickData::Solid(voxel) => {
-                            if NodeContent::pix_points_to_empty(
-                                voxel,
-                                &self.voxel_color_palette,
-                                &self.voxel_data_palette,
-                            ) {
-                                debug_assert_eq!(
-                                    0,
-                                    if let NodeChildren::OccupancyBitmap(occupied_bits) =
-                                        self.node_children[node_key]
-                                    {
-                                        occupied_bits
-                                    } else {
-                                        0xD34D
-                                    },
-                                    "Solid empty voxel should have its occupied bits set to 0, instead of {:#10X}",
-                                    if let NodeChildren::OccupancyBitmap(occupied_bits) =
-                                        self.node_children[node_key]
-                                    {
-                                        occupied_bits
-                                    } else {
-                                        0xD34D
-                                    }
-                                );
-                                *self.nodes.get_mut(node_key) = NodeContent::Nothing;
-                                self.node_children[node_key] = NodeChildren::NoChildren;
-                                true
-                            } else {
-                                debug_assert_eq!(
-                                    u64::MAX,
-                                    if let NodeChildren::OccupancyBitmap(occupied_bits) =
-                                        self.node_children[node_key]
-                                    {
-                                        occupied_bits
-                                    } else {
-                                        0xD34D
-                                    },
-                                    "Solid full voxel should have its occupied bits set to u64::MAX, instead of {:#10X}",
-                                    if let NodeChildren::OccupancyBitmap(occupied_bits) =
-                                        self.node_children[node_key]
-                                    {
-                                        occupied_bits
-                                    } else {
-                                        0xD34D
-                                    }
-                                );
-                                false
-                            }
-                        }
-                        BrickData::Parted(_brick) => {
-                            if brick.simplify(&self.voxel_color_palette, &self.voxel_data_palette) {
-                                debug_assert!(
-                                    self.node_children[node_key]
-                                        == NodeChildren::OccupancyBitmap(u64::MAX)
-                                        || self.node_children[node_key]
-                                            == NodeChildren::OccupancyBitmap(0),
-                                    "Expected brick occuped bits( inside {:?}) to be either full or empty, becasue it could be simplified",
-                                    self.node_children[node_key]
-                                );
-                                true
-                            } else {
-                                false
-                            }
+                NodeContent::UniformLeaf(brick) => match brick {
+                    BrickData::Empty => true,
+                    BrickData::Solid(voxel) => {
+                        if NodeContent::pix_points_to_empty(
+                            voxel,
+                            &self.voxel_color_palette,
+                            &self.voxel_data_palette,
+                        ) {
+                            debug_assert_eq!(
+                                0, self.nodes.get(node_key).occupied_bits,
+                                "Solid empty voxel should have its occupied bits set to 0, instead of {:#10X}",
+                                self.nodes.get(node_key).occupied_bits
+                            );
+                            self.nodes.get_mut(node_key).content = NodeContent::Nothing;
+                            self.nodes.get_mut(node_key).children = NodeChildren::NoChildren;
+                            true
+                        } else {
+                            debug_assert_eq!(
+                                u64::MAX, self.nodes.get(node_key).occupied_bits,
+                                "Solid full voxel should have its occupied bits set to u64::MAX, instead of {:#10X}",
+                                self.nodes.get(node_key).occupied_bits
+                            );
+                            false
                         }
                     }
-                }
+                    BrickData::Parted(_brick) => {
+                        if brick.simplify(&self.voxel_color_palette, &self.voxel_data_palette) {
+                            debug_assert!(
+                                self.nodes.get(node_key).occupied_bits == u64::MAX
+                                || self.nodes.get(node_key).occupied_bits == 0,
+                                "Expected brick occuped bits of node[{node_key}] to be either full or empty, becasue it could be simplified",
+                            );
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                },
                 NodeContent::Leaf(bricks) => {
-                    #[cfg(debug_assertions)]
-                    {
-                        for (sectant, brick) in
-                            bricks.iter().enumerate().take(BOX_NODE_CHILDREN_COUNT)
-                        {
-                            if let BrickData::Solid(_) | BrickData::Empty = brick {
-                                // with solid and empty bricks, the relevant occupied bits should either be empty or full
-                                if let NodeChildren::OccupancyBitmap(occupied_bits) =
-                                    self.node_children[node_key]
-                                {
-                                    let sectant_bitmask = 0x01 << sectant;
-                                    debug_assert!(
-                                        0 == occupied_bits & sectant_bitmask
-                                            || sectant_bitmask == occupied_bits & sectant_bitmask,
-                                        "Brickdata at sectant[{:?}] doesn't match occupied bits: {:?} <> {:#10X}",
-                                        sectant, brick, occupied_bits,
-                                    );
-                                }
-                            }
-                        }
-                    }
-
-                    debug_assert!(
-                        matches!(
-                            self.node_children[node_key],
-                            NodeChildren::OccupancyBitmap(_),
-                        ),
-                        "Expected node child to be OccupancyBitmap(_) instead of {:?}",
-                        self.node_children[node_key]
-                    );
-
                     // Try to simplify bricks
                     let mut simplified = false;
                     let mut is_leaf_uniform_solid = true;
@@ -792,14 +700,14 @@ impl<T: VoxelData> BoxTree<T>
                     let mut unified_brick = BrickData::Empty;
                     if is_leaf_uniform_solid {
                         debug_assert_ne!(uniform_solid_value, None);
+                        self.nodes.get_mut(node_key).content = NodeContent::UniformLeaf(
+                            BrickData::Solid(*uniform_solid_value.unwrap()),
+                        );
                         debug_assert_eq!(
-                            self.node_children[node_key],
-                            NodeChildren::OccupancyBitmap(u64::MAX),
+                            self.nodes.get(node_key).occupied_bits,
+                            u64::MAX,
                             "Expected Leaf with uniform solid value to have u64::MAX value"
                         );
-                        *self.nodes.get_mut(node_key) = NodeContent::UniformLeaf(BrickData::Solid(
-                            *uniform_solid_value.unwrap(),
-                        ));
                         return true;
                     }
 
@@ -888,34 +796,31 @@ impl<T: VoxelData> BoxTree<T>
                     }
 
                     if !matches!(unified_brick, BrickData::Empty) {
-                        *self.nodes.get_mut(node_key) = NodeContent::UniformLeaf(unified_brick);
+                        self.nodes.get_mut(node_key).content =
+                            NodeContent::UniformLeaf(unified_brick);
                     }
 
                     simplified
                 }
-                NodeContent::Internal(ocbits) => {
-                    if 0 == *ocbits
-                        || matches!(self.node_children[node_key], NodeChildren::NoChildren)
+                NodeContent::Internal => {
+                    if 0 == self.nodes.get(node_key).occupied_bits
+                        || matches!(self.nodes.get(node_key).children, NodeChildren::NoChildren)
                     {
-                        if let NodeContent::Nothing = self.nodes.get(node_key) {
+                        if let NodeContent::Nothing = self.nodes.get(node_key).content {
                             return false;
                         }
 
-                        *self.nodes.get_mut(node_key) = NodeContent::Nothing;
+                        self.nodes.get_mut(node_key).content = NodeContent::Nothing;
                         return true;
                     }
 
-                    debug_assert!(
-                        matches!(self.node_children[node_key], NodeChildren::Children(_)),
-                        "Expected Internal node to have Children instead of {:?}",
-                        self.node_children[node_key]
-                    );
-                    let child_keys =
-                        if let NodeChildren::Children(children) = self.node_children[node_key] {
-                            children
-                        } else {
-                            return false;
-                        };
+                    let child_keys = if let NodeChildren::Children(children) =
+                        self.nodes.get(node_key).children
+                    {
+                        children
+                    } else {
+                        return false;
+                    };
 
                     // Try to simplify each child of the node
                     if recursive {
@@ -925,24 +830,29 @@ impl<T: VoxelData> BoxTree<T>
                     }
 
                     for sectant in 1..BOX_NODE_CHILDREN_COUNT {
-                        if !self.compare_nodes(child_keys[0] as usize, child_keys[sectant] as usize)
+                        let child_key = child_keys[0] as usize;
+                        if !self.nodes.key_is_valid(child_key)
+                            || !matches!(
+                                self.nodes.get(child_key).content,
+                                NodeContent::UniformLeaf(BrickData::Solid(_))
+                            )
+                            || !self.compare_nodes(child_key, child_keys[sectant] as usize)
                         {
                             return false;
                         }
                     }
 
-                    // All children are the same!
+                    // All solid children are the same!
                     // make the current node a leaf, erase the children
                     debug_assert!(matches!(
-                        self.nodes.get(child_keys[0] as usize),
+                        self.nodes.get(child_keys[0] as usize).content,
                         NodeContent::Leaf(_) | NodeContent::UniformLeaf(_)
                     ));
                     self.nodes.swap(node_key, child_keys[0] as usize);
 
-                    // Deallocate children, and set correct occupancy bitmap
-                    let new_node_children = self.node_children[child_keys[0] as usize];
+                    // Deallocate children
                     self.deallocate_children_of(node_key);
-                    self.node_children[node_key] = new_node_children;
+                    self.nodes.get_mut(node_key).children = NodeChildren::NoChildren;
 
                     // At this point there's no need to call simplify on the new leaf node
                     // because it's been attempted already on the data it copied from

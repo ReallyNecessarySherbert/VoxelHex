@@ -1,16 +1,18 @@
-pub use crate::raytracing::bevy::types::{
-    BoxTreeGPUDataHandler, BoxTreeGPUHost, BoxTreeGPUView, BoxTreeMetaData, BoxTreeSpyGlass,
-    VhxViewSet, Viewport,
+pub use crate::raytracing::bevy::{
+    streaming::types::BoxTreeGPUDataHandler,
+    types::{
+        BoxTreeGPUHost, BoxTreeGPUView, BoxTreeMetaData, BoxTreeSpyGlass, VhxViewSet, Viewport,
+    },
 };
 use crate::{
-    boxtree::{BOX_NODE_CHILDREN_COUNT, V3c, V3cf32, VoxelData},
+    boxtree::{V3c, V3cf32, VoxelData, BOX_NODE_CHILDREN_COUNT},
     object_pool::empty_marker,
     raytracing::{
-        BoxTreeRenderData,
-        bevy::{
-            data::boxtree_properties,
+        bevy::streaming::{
+            boxtree_properties,
             types::{UploadQueueStatus, UploadQueueTargets},
         },
+        BoxTreeRenderData,
     },
     spatial::Cube,
 };
@@ -25,7 +27,7 @@ use bevy::{
 };
 use bimap::BiHashMap;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     sync::{Arc, RwLock},
 };
 
@@ -34,11 +36,14 @@ impl<T: VoxelData> BoxTreeGPUHost<T> {
     pub fn create_new_view(
         &mut self,
         viewset: &mut VhxViewSet,
-        viewport: Viewport,
+        mut viewport: Viewport,
         resolution: [u32; 2],
         mut images: ResMut<Assets<Image>>,
     ) -> usize {
-        let tree = &self.tree;
+        let tree = &self
+            .tree
+            .read()
+            .expect("Expected to be able to read tree from GPU host");
 
         // This is an estimation for the required number of nodes in the given view
         // which sums the number of nodes within the viewport on every level
@@ -68,15 +73,15 @@ impl<T: VoxelData> BoxTreeGPUHost<T> {
                 size: viewport.frustum.z,
             },
             render_data: BoxTreeRenderData {
-                mips_enabled: self.tree.mip_map_strategy.is_enabled(),
+                mips_enabled: tree.mip_map_strategy.is_enabled(),
                 boxtree_meta: BoxTreeMetaData {
-                    boxtree_size: self.tree.boxtree_size,
-                    tree_properties: boxtree_properties(&self.tree),
+                    boxtree_size: tree.boxtree_size,
+                    tree_properties: boxtree_properties(tree),
                     ambient_light_color: V3c::new(1., 1., 1.),
                     ambient_light_position: V3c::new(
-                        self.tree.boxtree_size as f32,
-                        self.tree.boxtree_size as f32,
-                        self.tree.boxtree_size as f32,
+                        tree.boxtree_size as f32,
+                        tree.boxtree_size as f32,
+                        tree.boxtree_size as f32,
                     ),
                 },
                 node_metadata: vec![0; (nodes_in_view as f32 / 8.).ceil() as usize],
@@ -86,29 +91,27 @@ impl<T: VoxelData> BoxTreeGPUHost<T> {
                 color_palette: vec![Vec4::ZERO; u16::MAX as usize],
             },
             upload_targets: UploadQueueTargets {
-                node_upload_queue: vec![],
-                brick_upload_queue: vec![],
-                brick_ownership: BiHashMap::new(),
-                brick_positions: vec![V3c::unit(0.); bricks_in_view],
+                nodes_to_see: Arc::default(),
+                brick_ownership: Arc::default(),
                 node_key_vs_meta_index: BiHashMap::new(),
                 node_index_vs_parent: HashMap::new(),
-                nodes_to_see: HashSet::new(),
             },
             upload_state: UploadQueueStatus {
                 victim_node: 0,
                 victim_brick: 0,
-                node_upload_progress: 0,
-                brick_upload_progress: 0,
+                bricks_to_upload: vec![],
+                target_node_stack: vec![],
                 uploaded_color_palette_size: 0,
             },
+            pending_upload_queue_update: None,
             nodes_in_view,
             bricks_in_view,
-            node_uploads_per_frame: 4,
-            brick_uploads_per_frame: 4,
-            brick_unload_search_perimeter: 8,
+            node_uploads_per_frame: 25,
+            brick_uploads_per_frame: 50,
+            brick_unload_search_perimeter: 10,
         };
         let output_texture = create_output_texture(resolution, &mut images);
-
+        viewport.update_matrices(resolution);
         viewset.views.push(Arc::new(RwLock::new(BoxTreeGPUView {
             resolution,
             reload: true,
@@ -137,6 +140,7 @@ impl BoxTreeGPUView {
     /// Erases the whole view to be uploaded to the GPU again
     pub fn reload(&mut self) {
         self.data_handler.upload_targets.reset();
+        self.data_handler.upload_state.bricks_to_upload.clear();
         self.reload = true;
     }
 

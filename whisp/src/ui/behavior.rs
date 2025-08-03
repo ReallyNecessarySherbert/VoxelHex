@@ -710,7 +710,17 @@ pub(crate) fn update(
         (&mut Dimension, &mut Transform, &Model, &Loading, &Slider),
         Without<Container>,
     >,
+    viewset: Option<ResMut<VhxViewSet>>,
 ) {
+    // Handle View reload request
+    if let Some(mut viewset) = viewset {
+        if let Some(mut view) = viewset.view_mut(0) {
+            if keys.just_pressed(KeyCode::Tab) {
+                view.reload();
+            }
+        }
+    }
+
     // Get mouse update motion:
     let mouse_update_motion = motion.read().map(|ev| ev.delta).sum();
 

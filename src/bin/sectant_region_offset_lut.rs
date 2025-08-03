@@ -24,11 +24,10 @@ fn main() {
             }
         }
     }
-    println!("CPU LUT: {:?}", sectant_offset);
+    println!("CPU LUT: {sectant_offset:?}");
     println!("WGSL LUT:");
     println!(
-        "//const\nvar<private> SECTANT_OFFSET_REGION_LUT: array<vec3f, {}> = array<u32, {}>(",
-        BOX_NODE_CHILDREN_COUNT, BOX_NODE_CHILDREN_COUNT
+        "//const\nvar<private> SECTANT_OFFSET_REGION_LUT: array<vec3f, {BOX_NODE_CHILDREN_COUNT}> = array<u32, {BOX_NODE_CHILDREN_COUNT}>("
     );
 
     for (sectant, offset) in sectant_offset.iter().enumerate() {

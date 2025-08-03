@@ -1,11 +1,11 @@
-use crate::{ui::UiState, ui::behavior::SettingsChanged, ui::components::*};
+use crate::{ui::behavior::SettingsChanged, ui::components::*, ui::UiState};
 use bevy::prelude::*;
 use bevy_lunex::prelude::*;
 use bevy_panorbit_camera::PanOrbitCamera;
 use bevy_pkv::PkvStore;
 use voxelhex::{
     boxtree::{V3c, V3cf32},
-    raytracing::VhxViewSet,
+    raytracing::{BoxTreeGPUHost, VhxViewSet},
 };
 
 pub(crate) fn setup_mouse_action(
@@ -100,10 +100,22 @@ pub(crate) struct CameraPosition {
     pitch: f32,
 }
 
+impl CameraPosition {
+    /// Baked position to showcase default voxel model
+    pub(crate) fn baked_model_pose() -> Self {
+        CameraPosition {
+            focus: Vec3::new(421.03085, 108.76257, 309.92087),
+            radius: 300.0,
+            yaw: 5.3603134,
+            pitch: -0.75049293,
+        }
+    }
+}
+
 impl Default for CameraPosition {
     fn default() -> Self {
         CameraPosition {
-            focus: Vec3::new(421.03085, 108.76257, 309.92087),
+            focus: Vec3::new(0., 0., 0.),
             radius: 300.0,
             yaw: 5.3603134,
             pitch: -0.75049293,
@@ -133,6 +145,9 @@ pub(crate) fn handle_camera_update(
     viewset: Option<ResMut<VhxViewSet>>,
     mut camera_query: Query<&mut PanOrbitCamera>,
     mut camera_locked_icon: Query<(&mut Sprite, &crate::ui::components::Camera, &Info)>,
+
+    // DEBUG!!
+    tree_host: Option<ResMut<BoxTreeGPUHost<u32>>>,
 ) {
     // Camera locked icon
     if keys.just_pressed(KeyCode::F4) {
@@ -150,6 +165,27 @@ pub(crate) fn handle_camera_update(
 
     // Camera movement
     if let Some(mut viewset) = viewset {
+        //DEBUG:Add red
+        if let Some(tree_host) = tree_host {
+            if keys.pressed(KeyCode::Space) {
+                let view = viewset.view(0).unwrap();
+                let viewport = view.spyglass.viewport();
+                let edit_position =
+                    V3c::from(viewport.origin() + viewport.direction * viewport.frustum.z / 4.);
+                tree_host
+                    .tree
+                    .write()
+                    .unwrap()
+                    .insert(
+                        &edit_position,
+                        &voxelhex::boxtree::Albedo::default()
+                            .with_red(255)
+                            .with_alpha(255),
+                    )
+                    .expect("Expected to be able to update tree");
+            }
+        }
+
         if viewset.is_empty() || ui_state.camera_locked {
             return; // Nothing to do without views or a locked camera..
         }

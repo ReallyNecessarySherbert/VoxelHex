@@ -814,12 +814,6 @@ mod node_stack_tests {
     use crate::raytracing::cpu::NodeStack;
 
     #[test]
-    fn test_stack_is_empty() {
-        let stack: NodeStack<i32> = NodeStack::default();
-        assert!(stack.is_empty(), "Stack should be empty on initialization");
-    }
-
-    #[test]
     fn test_stack_push_and_wrap_around() {
         let mut stack: NodeStack<i32, 3> = NodeStack::default();
 
