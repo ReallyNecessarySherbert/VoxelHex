@@ -12,7 +12,7 @@ use crate::{
 };
 
 #[cfg(debug_assertions)]
-use crate::spatial::math::FLOAT_ERROR_TOLERANCE;
+use crate::spatial::math::VOXEL_EPSILON;
 
 #[derive(Debug)]
 pub(crate) struct NodeStack<T, const SIZE: usize = 4> {
@@ -220,12 +220,12 @@ impl<T: VoxelData> BoxTree<T> {
                 // Check if the resulting point is inside bounds still
                 let relative_point = *ray_current_point - current_bounds.min_position;
                 debug_assert!(
-                    (relative_point.x < FLOAT_ERROR_TOLERANCE
-                        || (relative_point.x - current_bounds.size) < FLOAT_ERROR_TOLERANCE)
-                        || (relative_point.y < FLOAT_ERROR_TOLERANCE
-                            || (relative_point.y - current_bounds.size) < FLOAT_ERROR_TOLERANCE)
-                        || (relative_point.z < FLOAT_ERROR_TOLERANCE
-                            || (relative_point.z - current_bounds.size) < FLOAT_ERROR_TOLERANCE)
+                    (relative_point.x < VOXEL_EPSILON
+                        || (relative_point.x - current_bounds.size) < VOXEL_EPSILON)
+                        || (relative_point.y < VOXEL_EPSILON
+                            || (relative_point.y - current_bounds.size) < VOXEL_EPSILON)
+                        || (relative_point.z < VOXEL_EPSILON
+                            || (relative_point.z - current_bounds.size) < VOXEL_EPSILON)
                 );
             }
         }

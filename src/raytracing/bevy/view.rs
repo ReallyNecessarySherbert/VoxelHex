@@ -84,7 +84,7 @@ impl<T: VoxelData> BoxTreeGPUHost<T> {
                         tree.boxtree_size as f32,
                     ),
                 },
-                node_metadata: vec![0; (nodes_in_view as f32 / 8.).ceil() as usize],
+                node_metadata: vec![0; (nodes_in_view as f32 / 16.).ceil() as usize],
                 node_ocbits: vec![0; nodes_in_view * 2],
                 node_children: vec![empty_marker(); nodes_in_view * BOX_NODE_CHILDREN_COUNT],
                 node_mips: vec![empty_marker(); nodes_in_view],

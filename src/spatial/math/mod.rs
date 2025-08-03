@@ -7,7 +7,7 @@ use crate::{
 };
 use std::ops::Neg;
 
-pub(crate) const FLOAT_ERROR_TOLERANCE: f32 = 0.00001;
+pub(crate) const VOXEL_EPSILON: f32 = 0.00001;
 
 /// Maps 3 dimensional space limited by `size` to 1 dimension
 /// This mapping function supposes that the coordinates are bound inside
@@ -26,12 +26,12 @@ pub(crate) const fn flat_projection(x: usize, y: usize, z: usize, size: usize) -
 /// * `size` - Size of the region to check for child sectants
 pub(crate) fn offset_sectant(offset: &V3c<f32>, size: f32) -> u8 {
     debug_assert!(
-        offset.x <= (size + FLOAT_ERROR_TOLERANCE)
-            && offset.y <= (size + FLOAT_ERROR_TOLERANCE)
-            && offset.z <= (size + FLOAT_ERROR_TOLERANCE)
-            && offset.x >= (-FLOAT_ERROR_TOLERANCE)
-            && offset.y >= (-FLOAT_ERROR_TOLERANCE)
-            && offset.z >= (-FLOAT_ERROR_TOLERANCE),
+        offset.x <= (size + VOXEL_EPSILON)
+            && offset.y <= (size + VOXEL_EPSILON)
+            && offset.z <= (size + VOXEL_EPSILON)
+            && offset.x >= (-VOXEL_EPSILON)
+            && offset.y >= (-VOXEL_EPSILON)
+            && offset.z >= (-VOXEL_EPSILON),
         "Expected relative offset {offset:?} to be inside {size}^3"
     );
     // Scale to 0..BOX_NODE_CHILDREN_COUNT, then project to an unique index

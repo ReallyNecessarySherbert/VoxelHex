@@ -207,15 +207,13 @@ pub struct BoxTreeRenderData {
     /// Contains the properties of the Octree
     pub(crate) boxtree_meta: BoxTreeMetaData,
 
-    /// Node Property descriptors
+    /// Node Property descriptors, 16x2 bits for each Node
     ///  _===============================================================_
-    /// | Byte 0   | 8x 1 bit: 1 in case node is a leaf                  |
+    /// | 16*2 bits for 16 nodes                                         |
+    /// |================================================================|
+    /// | bit 0  | 1 if brick is leaf, 0 if isn't                        |
     /// |----------------------------------------------------------------|
-    /// | Byte 1   | 8x 1 bit: 1 in case node is uniform                 |
-    /// |----------------------------------------------------------------|
-    /// | Byte 2   | unused                                              |
-    /// |----------------------------------------------------------------|
-    /// | Byte 3   | unused                                              |
+    /// | bit 1  | 1 if brick is uniform, 0 if isn't                     |
     /// `================================================================`
     pub(crate) node_metadata: Vec<u32>,
 

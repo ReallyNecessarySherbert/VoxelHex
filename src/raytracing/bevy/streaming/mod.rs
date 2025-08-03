@@ -296,7 +296,7 @@ pub(crate) fn re_evaluate_view_size(view: &mut BoxTreeGPUView) {
         // Extend render data
         render_data
             .node_metadata
-            .resize((new_node_count as f32 / 8.).ceil() as usize, 0);
+            .resize((new_node_count as f32 / 16.).ceil() as usize, 0);
         render_data
             .node_children
             .resize(new_node_count * BOX_NODE_CHILDREN_COUNT, empty_marker());
@@ -553,8 +553,8 @@ pub(crate) fn upload<T: VoxelData>(
     let mut node_mips_updated = usize::MAX..0; // Any brick upload could invalidate node_mips values
     for cache_update in cache_updates.into_iter() {
         for (node_index, modified_children_bitfield) in cache_update.modified_nodes {
-            node_meta_updated.start = node_meta_updated.start.min(node_index / 8);
-            node_meta_updated.end = node_meta_updated.end.max(node_index / 8 + 1);
+            node_meta_updated.start = node_meta_updated.start.min(node_index / 16);
+            node_meta_updated.end = node_meta_updated.end.max(node_index / 16 + 1);
             ocbits_updated.start = ocbits_updated.start.min(node_index * 2);
             ocbits_updated.end = ocbits_updated.end.max(node_index * 2 + 2);
             node_mips_updated.start = node_mips_updated.start.min(node_index);

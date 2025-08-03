@@ -12,51 +12,6 @@ use std::hash::Hash;
 
 impl BoxTreeGPUDataHandler {
     //##############################################################################
-    //  ██████████     █████████   ███████████   █████████
-    // ░░███░░░░███   ███░░░░░███ ░█░░░███░░░█  ███░░░░░███
-    //  ░███   ░░███ ░███    ░███ ░   ░███  ░  ░███    ░███
-    //  ░███    ░███ ░███████████     ░███     ░███████████
-    //  ░███    ░███ ░███░░░░░███     ░███     ░███░░░░░███
-    //  ░███    ███  ░███    ░███     ░███     ░███    ░███
-    //  ██████████   █████   █████    █████    █████   █████
-    // ░░░░░░░░░░   ░░░░░   ░░░░░    ░░░░░    ░░░░░   ░░░░░
-
-    //  ██████████   ██████████  █████████  █████   █████████  ██████   █████
-    // ░░███░░░░███ ░░███░░░░░█ ███░░░░░███░░███   ███░░░░░███░░██████ ░░███
-    //  ░███   ░░███ ░███  █ ░ ░███    ░░░  ░███  ███     ░░░  ░███░███ ░███
-    //  ░███    ░███ ░██████   ░░█████████  ░███ ░███          ░███░░███░███
-    //  ░███    ░███ ░███░░█    ░░░░░░░░███ ░███ ░███    █████ ░███ ░░██████
-    //  ░███    ███  ░███ ░   █ ███    ░███ ░███ ░░███  ░░███  ░███  ░░█████
-    //  ██████████   ██████████░░█████████  █████ ░░█████████  █████  ░░█████
-    // ░░░░░░░░░░   ░░░░░░░░░░  ░░░░░░░░░  ░░░░░   ░░░░░░░░░  ░░░░░    ░░░░░
-    //##############################################################################
-    /// Creates the descriptor bytes for the given node
-    fn inject_node_properties<T>(
-        meta_array: &mut [u32],
-        node_index: usize,
-        tree: &BoxTree<T>,
-        node_key: usize,
-    ) where
-        T: Default + Clone + Eq + VoxelData + Hash,
-    {
-        // set node type
-        match &tree.nodes.get(node_key).content {
-            NodeContent::Internal | NodeContent::Nothing => {
-                meta_array[node_index / 8] &= !(0x01 << (node_index % 8));
-                meta_array[node_index / 8] &= !(0x01 << (8 + (node_index % 8)));
-            }
-            NodeContent::Leaf(_bricks) => {
-                meta_array[node_index / 8] |= 0x01 << (node_index % 8);
-                meta_array[node_index / 8] &= !(0x01 << (8 + (node_index % 8)));
-            }
-            NodeContent::UniformLeaf(_brick) => {
-                meta_array[node_index / 8] |= 0x01 << (node_index % 8);
-                meta_array[node_index / 8] |= 0x01 << (8 + (node_index % 8));
-            }
-        };
-    }
-
-    //##############################################################################
     //  ██████████ ███████████     █████████    █████████  ██████████
     // ░░███░░░░░█░░███░░░░░███   ███░░░░░███  ███░░░░░███░░███░░░░░█
     //  ░███  █ ░  ░███    ░███  ░███    ░███ ░███    ░░░  ░███  █ ░
@@ -199,6 +154,32 @@ impl BoxTreeGPUDataHandler {
     //  █████  ░░█████ ░░░███████░   ██████████   ██████████
     // ░░░░░    ░░░░░    ░░░░░░░    ░░░░░░░░░░   ░░░░░░░░░░
     //##############################################################################
+
+    /// Creates the descriptor bytes for the given node
+    fn inject_node_properties<T>(
+        meta_array: &mut [u32],
+        node_index: usize,
+        tree: &BoxTree<T>,
+        node_key: usize,
+    ) where
+        T: Default + Clone + Eq + VoxelData + Hash,
+    {
+        // set node type
+        match &tree.nodes.get(node_key).content {
+            NodeContent::Internal | NodeContent::Nothing => {
+                meta_array[node_index / 16] &= !(0x01 << (2 * (node_index % 16)));
+                meta_array[node_index / 16] &= !(0x02 << (2 * (node_index % 16)));
+            }
+            NodeContent::Leaf(_bricks) => {
+                meta_array[node_index / 16] |= 0x01 << (2 * (node_index % 16));
+                meta_array[node_index / 16] &= !(0x02 << (2 * (node_index % 16)));
+            }
+            NodeContent::UniformLeaf(_brick) => {
+                meta_array[node_index / 16] |= 0x01 << (2 * (node_index % 16));
+                meta_array[node_index / 16] |= 0x02 << (2 * (node_index % 16));
+            }
+        };
+    }
 
     /// Provides the first available index in the metadata buffer which can be overwritten
     /// Optionally the source where the child can be taken from

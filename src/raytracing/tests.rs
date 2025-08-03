@@ -1,7 +1,7 @@
 use crate::{
     boxtree::V3c,
     spatial::{
-        math::FLOAT_ERROR_TOLERANCE,
+        math::VOXEL_EPSILON,
         raytracing::{plane_line_intersection, Ray},
         Cube,
     },
@@ -45,17 +45,17 @@ pub(crate) fn get_step_to_next_sibling(current: &Cube, ray: &Ray) -> V3c<f32> {
 
     // Step along the axes with the minimum distances
     V3c::new(
-        if (min_d - x_plane_distance).abs() < FLOAT_ERROR_TOLERANCE {
+        if (min_d - x_plane_distance).abs() < VOXEL_EPSILON {
             (current.size).copysign(ray.direction.x)
         } else {
             0.
         },
-        if (min_d - y_plane_distance).abs() < FLOAT_ERROR_TOLERANCE {
+        if (min_d - y_plane_distance).abs() < VOXEL_EPSILON {
             (current.size).copysign(ray.direction.y)
         } else {
             0.
         },
-        if (min_d - z_plane_distance).abs() < FLOAT_ERROR_TOLERANCE {
+        if (min_d - z_plane_distance).abs() < VOXEL_EPSILON {
             (current.size).copysign(ray.direction.z)
         } else {
             0.
@@ -77,7 +77,7 @@ mod boxtree_raytracing_tests {
     use crate::{
         boxtree::{Albedo, BoxTree, BoxTreeEntry, V3c},
         raytracing::tests::get_step_to_next_sibling,
-        spatial::{math::FLOAT_ERROR_TOLERANCE, raytracing::Ray, Cube},
+        spatial::{math::VOXEL_EPSILON, raytracing::Ray, Cube},
         voxel_data,
     };
 
@@ -112,7 +112,7 @@ mod boxtree_raytracing_tests {
             );
 
             assert!(
-                FLOAT_ERROR_TOLERANCE
+                VOXEL_EPSILON
                     > (get_step_to_next_sibling(&cube, &ray)
                         - BoxTree::<Albedo>::dda_step_to_next_sibling(
                             &ray,
