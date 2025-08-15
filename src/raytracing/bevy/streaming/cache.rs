@@ -223,12 +223,12 @@ impl BoxTreeGPUDataHandler {
     /// Writes: metadata, available child information, occupied bits and parent connections
     /// It will try to collecty MIP information if still available, but will not upload a MIP
     /// * `returns` - The update package for the insertion
-    pub(crate) fn add_node<'a, T: VoxelData>(
+    pub(crate) fn add_node<T: VoxelData>(
         &mut self,
-        tree: &'a BoxTree<T>,
+        tree: &BoxTree<T>,
         parent_key: usize,
         target_sectant: u8,
-    ) -> CacheUpdatePackage<'a> {
+    ) -> CacheUpdatePackage {
         let node_key = if target_sectant < BOX_NODE_CHILDREN_COUNT as u8 {
             tree.nodes.get(parent_key).child(target_sectant)
         } else {
@@ -351,9 +351,7 @@ impl BoxTreeGPUDataHandler {
                 .upload_targets
                 .node_key_vs_meta_index
                 .get_by_left(&parent_key)
-                .expect(
-                &format!("Expected node parent[{parent_key}] to be in GPU render data while uploading child[{target_sectant}](node[{node_key}])!").to_string()
-                );
+                .unwrap_or_else(|| { panic!("{}", format!("Expected node parent[{parent_key}] to be in GPU render data while uploading child[{target_sectant}](node[{node_key}])!").to_string()) });
             let parent_child_index =
                 (parent_meta_index * BOX_NODE_CHILDREN_COUNT) + target_sectant as usize;
             self.render_data.node_children[parent_child_index] = node_index as u32;
@@ -626,151 +624,116 @@ impl BoxTreeGPUDataHandler {
 
     /// Makes space for the requested brick and updates brick ownership if needed
     /// * `tree` - The boxtree where the brick is found
-    /// * `node_key` - The key for the requested leaf node, whoose child needs to be uploaded
-    /// * `target_sectant` - The sectant where the target brick lies
+    /// * `brick_request` - The request for the brick to update
     /// * `returns` - brick updates applied and nodes updated during insertion
-    pub(crate) fn add_brick<'a, T>(
+    pub(crate) fn add_brick<T>(
         &mut self,
-        tree: &'a BoxTree<T>,
+        tree: &BoxTree<T>,
         brick_request: BrickOwnedBy,
-    ) -> CacheUpdatePackage<'a>
+    ) -> CacheUpdatePackage
     where
         T: Default + Clone + Eq + Send + Sync + Hash + VoxelData + 'static,
     {
         let Some(brick_index) = self.first_available_brick(tree.brick_dim as f32) else {
             return CacheUpdatePackage::allocation_failed();
         };
-
-        let (brick, parent_node_key, target_sectant) = match brick_request {
-            BrickOwnedBy::None => panic!("requesting brick upload with 'no ownership' for brick "),
-            BrickOwnedBy::NodeAsChild(node_key, child_sectant, _brick_bl) => {
-                match &tree.nodes.get(node_key as usize).content {
-                    NodeContent::UniformLeaf(brick) => {
-                        debug_assert_eq!(
-                            child_sectant, 0,
-                            "Expected child of UniformLeaf to be requested as sectant 0!"
-                        );
-                        (brick, node_key as usize, child_sectant as usize)
-                    }
-                    NodeContent::Leaf(bricks) => (
-                        &bricks[child_sectant as usize],
-                        node_key as usize,
-                        child_sectant as usize,
-                    ),
-                    NodeContent::Nothing | NodeContent::Internal => {
-                        unreachable!("Shouldn't add brick from Internal or empty node!")
-                    }
-                }
+        let (parent_node_key, target_sectant) = match brick_request {
+            BrickOwnedBy::None => {
+                unreachable!("requesting brick upload with 'no ownership' for brick ")
             }
-            BrickOwnedBy::NodeAsMIP(node_key) => (
-                &tree.nodes.get(node_key as usize).mip,
-                node_key as usize,
-                BOX_NODE_CHILDREN_COUNT,
-            ),
+            BrickOwnedBy::NodeAsChild(node_key, child_sectant, _brick_bl) => {
+                (node_key as usize, child_sectant as usize)
+            }
+            BrickOwnedBy::NodeAsMIP(node_key) => (node_key as usize, BOX_NODE_CHILDREN_COUNT),
         };
 
-        match brick {
-            BrickData::Empty => CacheUpdatePackage::default(),
-            BrickData::Solid(_voxel) => unreachable!("Shouldn't try to upload solid bricks"),
-            BrickData::Parted(brick) => {
-                let brick_ownership_entry = self
-                    .upload_targets
-                    .brick_ownership
-                    .read()
-                    .expect("Expected to be able to read brick ownership entries")
-                    .get_by_left(&brick_index)
-                    .cloned()
-                    .unwrap_or(BrickOwnedBy::None);
-                let mut modified_nodes = match brick_ownership_entry {
-                    BrickOwnedBy::NodeAsChild(key, sectant, _brick_bl) => {
-                        if self
-                            .upload_targets
-                            .node_key_vs_meta_index
-                            .get_by_left(&(key as usize))
-                            .is_some()
-                        {
-                            self.erase_node_child(
-                                *self
-                                    .upload_targets
-                                    .node_key_vs_meta_index
-                                    .get_by_left(&(key as usize))
-                                    .unwrap(),
-                                sectant as usize,
-                                tree,
-                            )
-                        } else {
-                            Vec::new()
-                        }
-                    }
-                    BrickOwnedBy::NodeAsMIP(key) => {
-                        // erase MIP from node if present
-                        if self
-                            .upload_targets
-                            .node_key_vs_meta_index
-                            .get_by_left(&(key as usize))
-                            .is_some()
-                        {
-                            let robbed_meta_index = *self
-                                .upload_targets
-                                .node_key_vs_meta_index
-                                .get_by_left(&(key as usize))
-                                .unwrap();
-                            self.render_data.node_mips[robbed_meta_index] = empty_marker();
-                            vec![(robbed_meta_index, 0)]
-                        } else {
-                            Vec::new()
-                        }
-                    }
-                    BrickOwnedBy::None => Vec::new(),
-                };
-
-                // Set parent connection
-                debug_assert!(
-                    self.upload_targets
-                        .node_key_vs_meta_index
-                        .contains_left(&parent_node_key),
-                    "Expected brick parent to be in GPU render data at the time of upload"
-                );
-                let parent_meta_index = self
+        let brick_ownership_entry = self
+            .upload_targets
+            .brick_ownership
+            .read()
+            .expect("Expected to be able to read brick ownership entries")
+            .get_by_left(&brick_index)
+            .cloned()
+            .unwrap_or(BrickOwnedBy::None);
+        let mut modified_nodes = match brick_ownership_entry {
+            BrickOwnedBy::NodeAsChild(key, sectant, _brick_bl) => {
+                if self
                     .upload_targets
                     .node_key_vs_meta_index
-                    .get_by_left(&parent_node_key)
-                    .unwrap();
-                if target_sectant < BOX_NODE_CHILDREN_COUNT {
-                    modified_nodes.push((*parent_meta_index, 0x01 << target_sectant));
-                    let parent_child_index =
-                        (parent_meta_index * BOX_NODE_CHILDREN_COUNT) + target_sectant;
-                    self.render_data.node_children[parent_child_index] =
-                        0x7FFFFFFF & brick_index as u32;
+                    .get_by_left(&(key as usize))
+                    .is_some()
+                {
+                    self.erase_node_child(
+                        *self
+                            .upload_targets
+                            .node_key_vs_meta_index
+                            .get_by_left(&(key as usize))
+                            .unwrap(),
+                        sectant as usize,
+                        tree,
+                    )
                 } else {
-                    modified_nodes.push((*parent_meta_index, 0));
-                    self.render_data.node_mips[*parent_meta_index] =
-                        0x7FFFFFFF & brick_index as u32;
-                }
-
-                // Set tracking data on CPU
-                self.upload_targets
-                    .brick_ownership
-                    .write()
-                    .expect("Expected to be able to update brick ownership entries")
-                    .insert(brick_index, brick_request);
-
-                debug_assert_eq!(
-                    tree.brick_dim.pow(3) as usize,
-                    brick.len(),
-                    "Expected Brick slice to align to tree brick dimension"
-                );
-
-                CacheUpdatePackage {
-                    allocation_failed: false,
-                    added_node: None,
-                    brick_updates: vec![BrickUpdate {
-                        brick_index,
-                        data: &brick[..],
-                    }],
-                    modified_nodes,
+                    Vec::new()
                 }
             }
+            BrickOwnedBy::NodeAsMIP(key) => {
+                // erase MIP from node if present
+                if self
+                    .upload_targets
+                    .node_key_vs_meta_index
+                    .get_by_left(&(key as usize))
+                    .is_some()
+                {
+                    let robbed_meta_index = *self
+                        .upload_targets
+                        .node_key_vs_meta_index
+                        .get_by_left(&(key as usize))
+                        .unwrap();
+                    self.render_data.node_mips[robbed_meta_index] = empty_marker();
+                    vec![(robbed_meta_index, 0)]
+                } else {
+                    Vec::new()
+                }
+            }
+            BrickOwnedBy::None => Vec::new(),
+        };
+
+        // Set parent connection
+        debug_assert!(
+            self.upload_targets
+                .node_key_vs_meta_index
+                .contains_left(&parent_node_key),
+            "Expected brick parent to be in GPU render data at the time of upload"
+        );
+        let parent_meta_index = self
+            .upload_targets
+            .node_key_vs_meta_index
+            .get_by_left(&parent_node_key)
+            .unwrap();
+        if target_sectant < BOX_NODE_CHILDREN_COUNT {
+            modified_nodes.push((*parent_meta_index, 0x01 << target_sectant));
+            let parent_child_index = (parent_meta_index * BOX_NODE_CHILDREN_COUNT) + target_sectant;
+            self.render_data.node_children[parent_child_index] = 0x7FFFFFFF & brick_index as u32;
+        } else {
+            modified_nodes.push((*parent_meta_index, 0));
+            self.render_data.node_mips[*parent_meta_index] = 0x7FFFFFFF & brick_index as u32;
+        }
+
+        // Set tracking data on CPU
+        self.upload_targets
+            .brick_ownership
+            .write()
+            .expect("Expected to be able to update brick ownership entries")
+            .insert(brick_index, brick_request.clone());
+
+        CacheUpdatePackage {
+            allocation_failed: false,
+            added_node: None,
+            brick_updates: vec![BrickUpdate {
+                brick_index,
+                owned_by: brick_request,
+            }],
+            modified_nodes,
         }
     }
 }

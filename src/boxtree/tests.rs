@@ -5,7 +5,7 @@ mod iterate_tests {
             BOX_NODE_DIMENSION,
         },
         make_tree,
-        spatial::{math::vector::V3c, raytracing::step_sectant, Cube},
+        spatial::{math::vector::V3c, step_sectant, Cube},
     };
 
     #[test]

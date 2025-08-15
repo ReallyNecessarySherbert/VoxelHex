@@ -217,15 +217,18 @@ fn add_children_nodes_to_upload_queue<T: VoxelData>(
 // ░░░░░        ░░░░░   ░░░░░    ░░░░░░░      ░░░░░░░░░  ░░░░░░░░░░  ░░░░░░░░░   ░░░░░░░░░
 //##############################################################################
 /// Recreate the list of nodes currently required to be inside the viewport
-pub(crate) fn process<'a, T: VoxelData>(
+pub(crate) fn process<T: VoxelData>(
     commands: &mut Commands,
-    tree: &'a BoxTree<T>,
     tree_host: &BoxTreeGPUHost<T>,
     view: &mut BoxTreeGPUView,
     mut upload_queue_update: Option<ResMut<UploadQueueUpdateTask>>,
-) -> Vec<CacheUpdatePackage<'a>> {
+) -> Vec<CacheUpdatePackage> {
     let mut cache_updates = vec![];
     let view_distance = view.spyglass.viewport.frustum.z;
+    let tree = &tree_host
+        .tree
+        .read()
+        .expect("Expected to be able to read tree");
 
     if view.reload {
         // rebuild upload queue if not already in progress

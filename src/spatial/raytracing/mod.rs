@@ -1,5 +1,4 @@
 use crate::spatial::{
-    lut::SECTANT_STEP_RESULT_LUT,
     math::vector::{V3c, V3cf32},
     Cube,
 };
@@ -69,15 +68,6 @@ impl Cube {
             size: brick_dim as f32,
         }
     }
-}
-
-/// Provides the resulting sectant based on the given sectant
-/// Returns with a value larger than `BOX_NODE_CHILDREN_COUNT - 1` when out of bounds.
-/// Important note: the specs of `signum` behvaes differently for f32 and i32
-/// So the conversion to i32 is absolutely required
-pub(crate) const fn step_sectant(sectant: u8, step: V3c<f32>) -> u8 {
-    SECTANT_STEP_RESULT_LUT[sectant as usize][((step.x as i32).signum() + 1) as usize]
-        [((step.y as i32).signum() + 1) as usize][((step.z as i32).signum() + 1) as usize]
 }
 
 /// calculates the distance between the line, and the plane both described by a ray

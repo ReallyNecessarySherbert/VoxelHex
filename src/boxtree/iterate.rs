@@ -6,8 +6,7 @@ use crate::{
     },
     spatial::{
         math::vector::{V3c, V3cf32},
-        raytracing::step_sectant,
-        Cube,
+        step_sectant, Cube,
     },
 };
 use std::{
@@ -121,8 +120,7 @@ pub(crate) fn execute_for_relevant_sectants<F: FnMut(V3c<u32>, V3c<u32>, u8, &Cu
     V3c::from(update_size)
 }
 
-impl<T: VoxelData> BoxTree<T>
-{
+impl<T: VoxelData> BoxTree<T> {
     /// Provides the path to the given node from the root node
     pub(crate) fn get_access_stack_for(
         &self,

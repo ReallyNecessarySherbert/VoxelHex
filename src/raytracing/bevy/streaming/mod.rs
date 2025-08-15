@@ -32,13 +32,16 @@ use std::{
 };
 
 /// Process updates made to the Boxtree inside the given tree host
-pub(crate) fn handle_tree_updates<'a, T: VoxelData>(
-    tree: &'a BoxTree<T>,
-    tree_host: &'a BoxTreeGPUHost<T>,
+pub(crate) fn handle_tree_updates<T: VoxelData>(
+    tree_host: &BoxTreeGPUHost<T>,
     view: &mut BoxTreeGPUView,
     nodes_to_process: usize,
-) -> Vec<CacheUpdatePackage<'a>> {
+) -> Vec<CacheUpdatePackage> {
     let mut cache_updates = vec![];
+    let tree = &tree_host
+        .tree
+        .read()
+        .expect("Expected to be able to read tree");
 
     for _ in 0..nodes_to_process {
         let Some((node_access_stack, updated_sectants)) = tree_host
@@ -62,22 +65,23 @@ pub(crate) fn handle_tree_updates<'a, T: VoxelData>(
             BoxTree::<T>::ROOT_NODE_KEY as usize,
             BOX_NODE_CHILDREN_COUNT as u8,
         ));
+        let root_mip_entry = BrickOwnedBy::NodeAsMIP(BoxTree::<T>::ROOT_NODE_KEY);
         if let Some(existing_brick) = data_handler
             .upload_targets
             .brick_ownership
             .read()
             .expect("Expected to be able to read brick ownership entries")
-            .get_by_right(&BrickOwnedBy::NodeAsMIP(BoxTree::<T>::ROOT_NODE_KEY))
+            .get_by_right(&root_mip_entry)
         {
             match &tree.nodes.get(BoxTree::<T>::ROOT_NODE_KEY as usize).mip {
                 BrickData::Empty | BrickData::Solid(_) => {}
-                BrickData::Parted(brick) => {
+                BrickData::Parted(_brick) => {
                     cache_updates.push(CacheUpdatePackage {
                         allocation_failed: false,
                         added_node: None,
                         brick_updates: vec![BrickUpdate {
                             brick_index: *existing_brick,
-                            data: &brick[..],
+                            owned_by: root_mip_entry,
                         }],
                         modified_nodes: vec![],
                     });
@@ -123,30 +127,30 @@ pub(crate) fn handle_tree_updates<'a, T: VoxelData>(
                 cache_updates.push(new_node_update);
 
                 // Upload MIP to GPU
+                let node_mip_entry = BrickOwnedBy::NodeAsMIP(node_key as u32);
                 if let Some(existing_brick) = data_handler
                     .upload_targets
                     .brick_ownership
                     .read()
                     .expect("Expected to be able to read brick ownership entries")
-                    .get_by_right(&BrickOwnedBy::NodeAsMIP(node_key as u32))
+                    .get_by_right(&node_mip_entry)
                 {
                     match &tree.nodes.get(node_key).mip {
                         BrickData::Empty | BrickData::Solid(_) => {}
-                        BrickData::Parted(brick) => {
+                        BrickData::Parted(_brick) => {
                             cache_updates.push(CacheUpdatePackage {
                                 allocation_failed: false,
                                 added_node: None,
                                 brick_updates: vec![BrickUpdate {
                                     brick_index: *existing_brick,
-                                    data: &brick[..],
+                                    owned_by: node_mip_entry,
                                 }],
                                 modified_nodes: vec![],
                             });
                         }
                     }
                 } else {
-                    let mip_update =
-                        data_handler.add_brick(tree, BrickOwnedBy::NodeAsMIP(node_key as u32));
+                    let mip_update = data_handler.add_brick(tree, node_mip_entry);
                     if mip_update.allocation_failed {
                         // Can't fit new MIP brick into buffers, need to rebuild the pipeline
                         re_evaluate_view_size(view);
@@ -165,7 +169,7 @@ pub(crate) fn handle_tree_updates<'a, T: VoxelData>(
             }
             NodeContent::UniformLeaf(brick) => match brick {
                 BrickData::Empty | BrickData::Solid(_) => {}
-                BrickData::Parted(brick) => {
+                BrickData::Parted(_brick_data) => {
                     debug_assert_eq!(updated_sectants, vec![0]);
                     let brick_ownership_entry = BrickOwnedBy::NodeAsChild(
                         parent_key as u32,
@@ -184,7 +188,7 @@ pub(crate) fn handle_tree_updates<'a, T: VoxelData>(
                             added_node: None,
                             brick_updates: vec![BrickUpdate {
                                 brick_index: *brick_index,
-                                data: &brick[..],
+                                owned_by: brick_ownership_entry,
                             }],
                             modified_nodes: vec![],
                         });
@@ -198,6 +202,10 @@ pub(crate) fn handle_tree_updates<'a, T: VoxelData>(
                 let brick_update_requests = updated_sectants
                     .into_iter()
                     .filter_map(|sec| {
+                        debug_assert!(
+                            matches!(bricks[sec as usize], BrickData::Parted(_)),
+                            "Expected BrickData of Leaf node to be parted during the processing of the brick upload list"
+                        );
                         let brick_ownership_entry = BrickOwnedBy::NodeAsChild(
                             parent_key as u32,
                             sec,
@@ -211,7 +219,7 @@ pub(crate) fn handle_tree_updates<'a, T: VoxelData>(
                             .expect("Expected to be able to read brick ownership entries")
                             .get_by_right(&brick_ownership_entry)
                         {
-                            Some((*brick_index, sec))
+                            Some((*brick_index, brick_ownership_entry))
                         } else {
                             new_brick_requests.push(brick_ownership_entry);
                             None
@@ -220,25 +228,16 @@ pub(crate) fn handle_tree_updates<'a, T: VoxelData>(
                     .collect::<Vec<_>>();
 
                 // Re-upload relevant child bricks already inside the to GPU one more time
-                for (brick_index, target_sectant) in brick_update_requests {
-                    debug_assert!(matches!(
-                        bricks[target_sectant as usize],
-                        BrickData::Parted(_)
-                    ));
-                    match &bricks[target_sectant as usize] {
-                        BrickData::Empty | BrickData::Solid(_) => {}
-                        BrickData::Parted(brick) => {
-                            cache_updates.push(CacheUpdatePackage {
-                                allocation_failed: false,
-                                added_node: None,
-                                brick_updates: vec![BrickUpdate {
-                                    brick_index,
-                                    data: &brick[..],
-                                }],
-                                modified_nodes: vec![],
-                            });
-                        }
-                    }
+                for (brick_index, brick_ownership_entry) in brick_update_requests {
+                    cache_updates.push(CacheUpdatePackage {
+                        allocation_failed: false,
+                        added_node: None,
+                        brick_updates: vec![BrickUpdate {
+                            brick_index,
+                            owned_by: brick_ownership_entry,
+                        }],
+                        modified_nodes: vec![],
+                    });
                 }
 
                 // Upload new bricks
@@ -405,7 +404,7 @@ impl PartialEq for BrickOwnedBy {
     }
 }
 
-impl CacheUpdatePackage<'_> {
+impl CacheUpdatePackage {
     /// Error state when memory allocation failed for an item within the GPU buffers
     pub(crate) fn allocation_failed() -> Self {
         CacheUpdatePackage {
@@ -445,31 +444,13 @@ pub(crate) fn upload<T: VoxelData>(
     }
 
     // Decide target nodes/bricks to upload
-    let tree_binding = tree_host
-        .tree
-        .read()
-        .expect("Expected to be able to read BoxTree");
-
     let cache_updates = if view.reload {
-        upload_queue::process(
-            &mut commands,
-            &tree_binding,
-            tree_host,
-            &mut view,
-            upload_queue_update,
-        )
+        upload_queue::process(&mut commands, tree_host, &mut view, upload_queue_update)
     } else {
         let nodes_to_process = view.data_handler.node_uploads_per_frame;
-        let tree_updates =
-            handle_tree_updates(&tree_binding, tree_host, &mut view, nodes_to_process);
+        let tree_updates = handle_tree_updates(tree_host, &mut view, nodes_to_process);
         if tree_updates.is_empty() {
-            upload_queue::process(
-                &mut commands,
-                &tree_binding,
-                tree_host,
-                &mut view,
-                upload_queue_update,
-            )
+            upload_queue::process(&mut commands, tree_host, &mut view, upload_queue_update)
         } else {
             tree_updates
         }
@@ -573,19 +554,55 @@ pub(crate) fn upload<T: VoxelData>(
 
         // Upload Voxel data
         for modified_brick_data in cache_update.brick_updates {
-            let voxel_start_index =
-                modified_brick_data.brick_index * modified_brick_data.data.len();
+            let node_key = match modified_brick_data.owned_by {
+                BrickOwnedBy::None => {
+                    unreachable!("requesting brick upload with 'no ownership' for brick ")
+                }
+                BrickOwnedBy::NodeAsChild(node_key, _, _) | BrickOwnedBy::NodeAsMIP(node_key) => {
+                    node_key
+                }
+            };
+            let node = tree.nodes.get(node_key as usize);
+            let brick_data = match modified_brick_data.owned_by {
+                BrickOwnedBy::None => {
+                    unreachable!("requesting brick upload with 'no ownership' for brick ")
+                }
+                BrickOwnedBy::NodeAsChild(_node_key, child_sectant, _brick_bl) => {
+                    match &node.content {
+                        NodeContent::UniformLeaf(brick) => {
+                            debug_assert_eq!(
+                                child_sectant, 0,
+                                "Expected child of UniformLeaf to be requested as sectant 0!"
+                            );
+                            brick
+                        }
+                        NodeContent::Leaf(bricks) => &bricks[child_sectant as usize],
+                        NodeContent::Nothing | NodeContent::Internal => {
+                            unreachable!("Shouldn't add brick from Internal or empty node!")
+                        }
+                    }
+                }
+                BrickOwnedBy::NodeAsMIP(node_key) => &tree.nodes.get(node_key as usize).mip,
+            };
+            debug_assert!(
+                matches!(brick_data, BrickData::Parted(_)),
+                "Expected requested brick update to upload parted data!"
+            );
+            let BrickData::Parted(brick_data) = brick_data else {
+                continue;
+            };
+
+            let voxel_start_index = modified_brick_data.brick_index * brick_data.len();
             debug_assert_eq!(
-                modified_brick_data.data.len(),
+                brick_data.len(),
                 tree.brick_dim.pow(3) as usize,
                 "Expected Brick slice to align to tree brick dimension"
             );
             unsafe {
                 render_queue.write_buffer(
                     &view.resources.as_ref().unwrap().voxels_buffer,
-                    (voxel_start_index * std::mem::size_of_val(&modified_brick_data.data[0]))
-                        as u64,
-                    modified_brick_data.data.align_to::<u8>().1,
+                    (voxel_start_index * std::mem::size_of_val(&brick_data[0])) as u64,
+                    brick_data.align_to::<u8>().1,
                 );
             }
         }

@@ -1,7 +1,4 @@
-use crate::boxtree::{V3c, V3cf32};
-
-#[cfg(feature = "raytracing")]
-use crate::boxtree::BOX_NODE_CHILDREN_COUNT;
+use crate::boxtree::{V3c, V3cf32, BOX_NODE_CHILDREN_COUNT};
 
 #[rustfmt::skip]
 pub(crate) const SECTANT_OFFSET_LUT: [V3cf32; 64] = [
@@ -27,7 +24,6 @@ pub(crate) const SECTANT_OFFSET_LUT: [V3cf32; 64] = [
 ];
 
 #[rustfmt::skip]
-#[cfg(feature = "raytracing")]
 pub(crate) const SECTANT_STEP_RESULT_LUT: [[[[u8; 3]; 3]; 3]; BOX_NODE_CHILDREN_COUNT] = [
     [[[127, 79, 95], [115, 67, 83], [119, 71, 87]], [[124, 76, 92], [112, 0, 16], [116, 4, 20]], [[125, 77, 93], [113, 1, 17], [117, 5, 21]]],
     [[[124, 76, 92], [112, 0, 16], [116, 4, 20]], [[125, 77, 93], [113, 1, 17], [117, 5, 21]], [[126, 78, 94], [114, 2, 18], [118, 6, 22]]],
