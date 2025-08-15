@@ -145,9 +145,6 @@ pub(crate) fn handle_camera_update(
     viewset: Option<ResMut<VhxViewSet>>,
     mut camera_query: Query<&mut PanOrbitCamera>,
     mut camera_locked_icon: Query<(&mut Sprite, &crate::ui::components::Camera, &Info)>,
-
-    // DEBUG!!
-    tree_host: Option<ResMut<BoxTreeGPUHost<u32>>>,
 ) {
     // Camera locked icon
     if keys.just_pressed(KeyCode::F4) {
@@ -165,27 +162,6 @@ pub(crate) fn handle_camera_update(
 
     // Camera movement
     if let Some(mut viewset) = viewset {
-        //DEBUG:Add red
-        if let Some(tree_host) = tree_host {
-            if keys.pressed(KeyCode::Space) {
-                let view = viewset.view(0).unwrap();
-                let viewport = view.spyglass.viewport();
-                let edit_position =
-                    V3c::from(viewport.origin() + viewport.direction * viewport.frustum.z / 4.);
-                tree_host
-                    .tree
-                    .write()
-                    .unwrap()
-                    .insert(
-                        &edit_position,
-                        &voxelhex::boxtree::Albedo::default()
-                            .with_red(255)
-                            .with_alpha(255),
-                    )
-                    .expect("Expected to be able to update tree");
-            }
-        }
-
         if viewset.is_empty() || ui_state.camera_locked {
             return; // Nothing to do without views or a locked camera..
         }

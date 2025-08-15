@@ -11,8 +11,10 @@ Roadmap:
 - Shadows, Lighting, Illumination: https://github.com/Ministry-of-Voxel-Affairs/VoxelHex/milestone/2
 - Data Compression, Load time minimizations: https://github.com/Ministry-of-Voxel-Affairs/VoxelHex/milestone/3
 - Displaying Vast Voxel landscapes: https://github.com/Ministry-of-Voxel-Affairs/VoxelHex/milestone/1
+- Data loading performance improvements: https://github.com/Ministry-of-Voxel-Affairs/VoxelHex/milestone/5
 
 Issue spotlight:
+- Hard shadows: https://github.com/Ministry-of-Voxel-Affairs/VoxelHex/issues/55
 - Improved normal handling: https://github.com/Ministry-of-Voxel-Affairs/VoxelHex/issues/11
 - Lights! Shadows!: https://github.com/Ministry-of-Voxel-Affairs/VoxelHex/issues/16
 - Drastic storage size decrease: https://github.com/Ministry-of-Voxel-Affairs/VoxelHex/issues/28
