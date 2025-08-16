@@ -1,6 +1,6 @@
 use crate::{
     boxtree::{V3c, V3cf32},
-    raytracing::BoxTreeRenderData,
+    raytracing::bevy::types::BoxTreeRenderData,
     spatial::Cube,
 };
 use bevy::{ecs::resource::Resource, tasks::Task};

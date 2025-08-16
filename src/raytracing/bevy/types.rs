@@ -24,6 +24,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 
+/// Properties of the tree stored on the GPU
 #[derive(Debug, Clone, ShaderType)]
 pub struct BoxTreeMetaData {
     /// Color of the ambient light in the render
@@ -35,7 +36,7 @@ pub struct BoxTreeMetaData {
     /// Size of the boxtree to display
     pub(crate) boxtree_size: u32,
 
-    /// Contains the properties of the Octree
+    /// Contains the properties of the BoxTree
     ///  _===================================================================_
     /// | Byte 0-1 | Voxel Brick Dimension                                    |
     /// |=====================================================================|
@@ -55,6 +56,7 @@ pub struct BoxTreeMetaData {
     pub(crate) tree_properties: u32,
 }
 
+/// The position and viewing distance of the viewer BoxTree rendering is based on
 #[derive(Debug, Clone, Copy, ShaderType)]
 pub struct Viewport {
     /// The origin of the viewport, think of it as the position the eye
@@ -87,7 +89,7 @@ pub struct Viewport {
 
 /// Represents a BoxTree hosted within the library as it is streamed to the GPU
 #[derive(Resource, Clone, TypePath, ExtractResource)]
-#[type_path = "shocovox::gpu::OctreeGPUHost"]
+#[type_path = "shocovox::gpu::BoxTreeGPUHost"]
 pub struct BoxTreeGPUHost<T = u32>
 where
     T: Default + Clone + Eq + VoxelData + Send + Sync + Hash + 'static,
@@ -128,7 +130,7 @@ pub struct BoxTreeSpyGlass {
     pub(crate) viewport: Viewport,
 }
 
-/// A View of an Octree
+/// A View of an BoxTree
 #[derive(Debug, Resource)]
 pub struct BoxTreeGPUView {
     /// Buffers, layouts and bind groups for the view
@@ -178,7 +180,7 @@ pub(crate) struct BoxTreeRenderDataResources {
     pub(crate) viewport_buffer: Buffer,
     // }--
 
-    // Octree render data group
+    // BoxTree render data group
     // --{
     pub(crate) tree_bind_group: BindGroup,
     pub(crate) boxtree_meta_buffer: Buffer,
@@ -200,11 +202,11 @@ pub(crate) struct BoxTreeRenderDataResources {
 
 #[derive(Debug, Clone, TypePath)]
 #[type_path = "shocovox::gpu::ShocoVoxRenderData"]
-pub struct BoxTreeRenderData {
+pub(crate) struct BoxTreeRenderData {
     /// CPU only field, contains stored MIP feature enabled state
     pub(crate) mips_enabled: bool,
 
-    /// Contains the properties of the Octree
+    /// Contains the properties of the BoxTree
     pub(crate) boxtree_meta: BoxTreeMetaData,
 
     /// Node Property descriptors, 16x2 bits for each Node

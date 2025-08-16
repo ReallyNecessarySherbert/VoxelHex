@@ -7,12 +7,12 @@ pub use crate::raytracing::bevy::{
 use crate::{
     boxtree::{V3c, V3cf32, VoxelData, BOX_NODE_CHILDREN_COUNT},
     object_pool::empty_marker,
-    raytracing::{
-        bevy::streaming::{
+    raytracing::bevy::{
+        streaming::{
             boxtree_properties,
             types::{UploadQueueStatus, UploadQueueTargets},
         },
-        BoxTreeRenderData,
+        types::BoxTreeRenderData,
     },
     spatial::Cube,
 };

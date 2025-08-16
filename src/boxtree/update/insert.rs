@@ -70,7 +70,7 @@ impl<T: VoxelData> BoxTree<T> {
         self.insert_at_lod_internal(overwrite_if_empty, position, 1, data)
     }
 
-    pub fn insert_at_lod_internal(
+    fn insert_at_lod_internal(
         &mut self,
         overwrite_if_empty: bool,
         position_u32: &V3c<u32>,
