@@ -332,6 +332,9 @@ impl BoxTreeGPUDataHandler {
         self.render_data.node_ocbits[node_index * 2 + 1] =
             ((occupied_bits & 0xFFFFFFFF00000000) >> 32) as u32;
 
+        // Update occupied boxes
+        self.render_data.node_ocbox[node_index] = tree.nodes.get(node_key).occupied_box;
+
         // Add empty children
         let child_children_offset = node_index * BOX_NODE_CHILDREN_COUNT;
         self.render_data.node_children.splice(

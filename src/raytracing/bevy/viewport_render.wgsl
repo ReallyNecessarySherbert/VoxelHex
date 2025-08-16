@@ -84,6 +84,39 @@ fn cube_intersect_ray(cube: Cube, ray: ptr<function, Line>, ray_inv_dir: ptr<fun
     );
 }
 
+fn ocbox_aabb_intersect(ray_point: vec3f, ray_inv_dir: vec3f, min_point: vec3f, max_point: vec3f) -> bool {
+    // Claude SlopGen
+    let t1 = (min_point - ray_point) * ray_inv_dir;
+    let t2 = (max_point - ray_point) * ray_inv_dir;
+    
+    let t_min = min(t1, t2);
+    let t_max = max(t1, t2);
+    
+    let t_near = max(max(t_min.x, t_min.y), t_min.z);
+    let t_far = min(min(t_max.x, t_max.y), t_max.z);
+    
+    return t_near <= t_far && t_far >= 0.0;
+
+    /*// Came From Error Buddy
+    let c = -ray_point * ray_inv_dir;
+    let t0s = min_point * ray_inv_dir + c;
+    let t1s = max_point * ray_inv_dir + c;
+    let tMins = min(t0s, t1s);
+    let tMaxs = max(t0s, t1s);
+    
+    let tNear = max(max(tMins.x, tMins.y), tMins.z);
+    let tFar = min(min(tMaxs.x, tMaxs.y), tMaxs.z);
+    
+    return (tNear <= tFar - 1e-4f);
+    /*//(tNear > tFar - 1e-4f) ? 1.0f : 0.0f
+    let miss = select(0., 1., tNear > tFar - 1e-4f);
+    let missResult = float2(POSITIVE_INFINITY_FLOAT, -POSITIVE_INFINITY_FLOAT);
+    
+    // If miss = 0, it returns float2(tNear, tFar).
+    // If miss = 1, it returns missResult.
+    return lerp(float2(tNear, tFar), missResult, miss);*/*/
+}
+
 //crate::raytracing::NodeStack
 const NODE_STACK_SIZE: u32 = 4;
 const EMPTY_MARKER: u32 = 0xFFFFFFFFu;
@@ -480,6 +513,35 @@ fn get_by_ray(ray: ptr<function, Line>, start_distance: f32) -> OctreeRayInterse
                 return OctreeRayIntersection( false, vec4f(0.), ray_current_point, vec3f(0., 0., 1.) );
             }
 
+            let node_ocbox_unit = current_bounds.size / 31.;
+            let ocbox_min_point = vec3f(
+                (
+                    current_bounds.min_position.x
+                    + node_ocbox_unit * f32(node_occupied_box[current_node_key] & 0x0000001F)
+                ),
+                (
+                    current_bounds.min_position.y
+                    + node_ocbox_unit * f32((node_occupied_box[current_node_key] & 0x00003E0) >> 5)
+                ),
+                (
+                    current_bounds.min_position.z
+                    + node_ocbox_unit * f32((node_occupied_box[current_node_key] & 0x00007C00) >> 10)
+                ),
+            );
+            let ocbox_max_point = vec3f(
+                (
+                    current_bounds.min_position.x
+                    + node_ocbox_unit * f32((node_occupied_box[current_node_key] & 0x000F8000) >> 15)
+                ),
+                (
+                    current_bounds.min_position.y
+                    + node_ocbox_unit * f32((node_occupied_box[current_node_key] & 0x01F00000) >> 20)
+                ),
+                (
+                    current_bounds.min_position.z
+                    + node_ocbox_unit * f32((node_occupied_box[current_node_key] & 0x3E000000) >> 25)
+                ),
+            );
             target_child_descriptor = node_children[(current_node_key * BOX_NODE_CHILDREN_COUNT) + target_sectant];
             if(
                 (0 != (boxtree_meta_data.tree_properties & 0x00010000)) // MIPs enabled
@@ -553,6 +615,11 @@ fn get_by_ray(ray: ptr<function, Line>, start_distance: f32) -> OctreeRayInterse
             }
             if( target_sectant >= BOX_NODE_CHILDREN_COUNT
                 || (0 != (current_node_metadata & 0x02u)) // node is uniform
+                // node_ocbox
+                || !ocbox_aabb_intersect(
+                    ray_current_point, ray_inv_dir,
+                    ocbox_min_point, ocbox_max_point
+                )
                 || ( // There is no overlap in node occupancy and ray potential hit area
                     0 == (
                         RAY_TO_NODE_OCCUPANCY_BITMASK_LUT[target_sectant][direction_lut_index * 2]
@@ -618,6 +685,11 @@ fn get_by_ray(ray: ptr<function, Line>, start_distance: f32) -> OctreeRayInterse
                 (target_child_descriptor != EMPTY_MARKER) // target is available
                 &&(0 == (current_node_metadata & 0x01u)) // node is not leaf
                 && node_occupied_at(current_occupied_bits, target_sectant)
+                // node_ocbox
+                && ocbox_aabb_intersect(
+                    ray_current_point, ray_inv_dir,
+                    ocbox_min_point, ocbox_max_point
+                )
             ) {
                 // PUSH
                 current_node_key = target_child_descriptor;
@@ -678,11 +750,32 @@ fn get_by_ray(ray: ptr<function, Line>, start_distance: f32) -> OctreeRayInterse
                         node_children[(current_node_key * BOX_NODE_CHILDREN_COUNT) + target_sectant],
                         target_sectant < BOX_NODE_CHILDREN_COUNT
                     );
+
                     if (
                         target_sectant >= BOX_NODE_CHILDREN_COUNT // target is out of bounds
                         || node_occupied_at(current_occupied_bits, target_sectant)
                         || dot(ray_current_point - (*ray).origin, ray_current_point - (*ray).origin) >= max_distance
                     ) {
+                        break;
+                    }
+
+                    if (
+                        ( // There is no overlap in node occupancy and ray potential hit area
+                            0 == (
+                                RAY_TO_NODE_OCCUPANCY_BITMASK_LUT[target_sectant][direction_lut_index * 2]
+                                & node_occupied_bits[current_node_key * 2]
+                            )
+                            && 0 == (
+                                RAY_TO_NODE_OCCUPANCY_BITMASK_LUT[target_sectant][direction_lut_index * 2 + 1]
+                                & node_occupied_bits[current_node_key * 2 + 1]
+                            )
+                        )
+                        || !ocbox_aabb_intersect(
+                            ray_current_point, ray_inv_dir,
+                            ocbox_min_point, ocbox_max_point
+                        )
+                    ) {
+                        target_child_descriptor = EMPTY_MARKER;
                         break;
                     }
                 } // advance loop
@@ -766,6 +859,9 @@ var<storage, read> node_mips: array<u32>;
 
 @group(2) @binding(4)
 var<storage, read> node_occupied_bits: array<u32>;
+
+@group(2) @binding(7)
+var<storage, read> node_occupied_box: array<u32>;
 
 @group(2) @binding(5)
 var<storage, read> voxels: array<PaletteIndexValues>;

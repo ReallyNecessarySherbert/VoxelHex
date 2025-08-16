@@ -153,6 +153,16 @@ pub(crate) fn create_bind_group_layouts(
                 count: None,
             },
             BindGroupLayoutEntry {
+                binding: 7u32,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::Buffer {
+                    ty: BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: Some(<Vec<u32> as ShaderType>::min_size()),
+                },
+                count: None,
+            },
+            BindGroupLayoutEntry {
                 binding: 5u32,
                 visibility: ShaderStages::COMPUTE,
                 ty: BindingType::Buffer {
@@ -376,6 +386,7 @@ pub(crate) fn create_tree_bind_group(
     Buffer,
     Buffer,
     Buffer,
+    Buffer,
 ) {
     let render_data = &tree_view.data_handler.render_data;
 
@@ -415,6 +426,14 @@ pub(crate) fn create_tree_bind_group(
     buffer.write(&render_data.node_ocbits).unwrap();
     let node_ocbits_buffer = render_device.create_buffer_with_data(&BufferInitDescriptor {
         label: Some("BoxTree Node Occupied Bits Buffer"),
+        contents: &buffer.into_inner(),
+        usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
+    });
+
+    let mut buffer = StorageBuffer::new(Vec::<u8>::new());
+    buffer.write(&render_data.node_ocbox).unwrap();
+    let node_ocbox_buffer = render_device.create_buffer_with_data(&BufferInitDescriptor {
+        label: Some("BoxTree Node Occupied Box Buffer"),
         contents: &buffer.into_inner(),
         usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
     });
@@ -462,6 +481,10 @@ pub(crate) fn create_tree_bind_group(
                     resource: node_ocbits_buffer.as_entire_binding(),
                 },
                 bevy::render::render_resource::BindGroupEntry {
+                    binding: 7,
+                    resource: node_ocbox_buffer.as_entire_binding(),
+                },
+                bevy::render::render_resource::BindGroupEntry {
                     binding: 5,
                     resource: voxels_buffer.as_entire_binding(),
                 },
@@ -476,6 +499,7 @@ pub(crate) fn create_tree_bind_group(
         node_children_buffer,
         node_mips_buffer,
         node_ocbits_buffer,
+        node_ocbox_buffer,
         voxels_buffer,
         color_palette_buffer,
     )

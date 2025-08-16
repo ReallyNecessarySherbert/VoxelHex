@@ -192,6 +192,7 @@ fn create_view_resources(
         node_children_buffer,
         node_mips_buffer,
         node_ocbits_buffer,
+        node_ocbox_buffer,
         voxels_buffer,
         color_palette_buffer,
     ) = create_tree_bind_group(pipeline, render_device, tree_view);
@@ -207,6 +208,7 @@ fn create_view_resources(
         node_children_buffer,
         node_mips_buffer,
         node_ocbits_buffer,
+        node_ocbox_buffer,
         voxels_buffer,
         color_palette_buffer,
     }
