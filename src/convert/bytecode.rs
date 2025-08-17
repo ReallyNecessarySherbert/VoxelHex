@@ -668,7 +668,7 @@ impl<T> BoxTree<T>
 where
     T: ToBencode + Default + Clone + Eq + Hash,
 {
-    /// The number of bytes to read from the bytes of an octree that makes sure
+    /// The number of bytes to read from the bytes of an boxtree that makes sure
     /// that the version object is included in the included bytes
     pub(crate) fn bytes_until_version() -> usize {
         std::mem::size_of::<crate::Version>() * 2
