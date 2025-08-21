@@ -60,11 +60,18 @@ pub(crate) fn handle_tree_updates<T: VoxelData>(
 
         // Upload changes to root node
         let data_handler = &mut view.data_handler;
-        cache_updates.push(data_handler.add_node(
+        if let Ok(new_node_update) = data_handler.add_node(
             tree,
             BoxTree::<T>::ROOT_NODE_KEY as usize,
             BOX_NODE_CHILDREN_COUNT as u8,
-        ));
+        ) {
+            cache_updates.push(new_node_update);
+        } else {
+            // Can't fit new node into buffers, need to rebuild the pipeline
+            re_evaluate_view_size(view);
+            return cache_updates; // voxel data still needs to be written out
+        }
+
         let root_mip_entry = BrickOwnedBy::NodeAsMIP(BoxTree::<T>::ROOT_NODE_KEY);
         if let Some(existing_brick) = data_handler
             .upload_targets
@@ -77,7 +84,6 @@ pub(crate) fn handle_tree_updates<T: VoxelData>(
                 BrickData::Empty | BrickData::Solid(_) => {}
                 BrickData::Parted(_brick) => {
                     cache_updates.push(CacheUpdatePackage {
-                        allocation_failed: false,
                         added_node: None,
                         brick_updates: vec![BrickUpdate {
                             brick_index: *existing_brick,
@@ -88,14 +94,15 @@ pub(crate) fn handle_tree_updates<T: VoxelData>(
                 }
             }
         } else {
-            let mip_update =
-                data_handler.add_brick(tree, BrickOwnedBy::NodeAsMIP(BoxTree::<T>::ROOT_NODE_KEY));
-            if mip_update.allocation_failed {
+            if let Ok(mip_update) =
+                data_handler.add_brick(tree, BrickOwnedBy::NodeAsMIP(BoxTree::<T>::ROOT_NODE_KEY))
+            {
+                cache_updates.push(mip_update);
+            } else {
                 // Can't fit new MIP brick into buffers, need to rebuild the pipeline
                 re_evaluate_view_size(view);
                 return cache_updates; // voxel data still needs to be written out
             }
-            cache_updates.push(mip_update);
         }
 
         // Upload rest of the update chain into GPU
@@ -117,14 +124,14 @@ pub(crate) fn handle_tree_updates<T: VoxelData>(
 
             if let Some(node_key) = tree.valid_child_for(parent_key, child_sectant) {
                 // Upload child Node to GPU
-                let new_node_update = data_handler.add_node(tree, parent_key, child_sectant);
-
-                if new_node_update.allocation_failed {
-                    // Can't fit new brick into buffers, need to rebuild the pipeline
+                if let Ok(new_node_update) = data_handler.add_node(tree, parent_key, child_sectant)
+                {
+                    cache_updates.push(new_node_update);
+                } else {
+                    // Can't fit new node into buffers, need to rebuild the pipeline
                     re_evaluate_view_size(view);
                     return cache_updates; // voxel data still needs to be written out
                 }
-                cache_updates.push(new_node_update);
 
                 // Upload MIP to GPU
                 let node_mip_entry = BrickOwnedBy::NodeAsMIP(node_key as u32);
@@ -139,7 +146,6 @@ pub(crate) fn handle_tree_updates<T: VoxelData>(
                         BrickData::Empty | BrickData::Solid(_) => {}
                         BrickData::Parted(_brick) => {
                             cache_updates.push(CacheUpdatePackage {
-                                allocation_failed: false,
                                 added_node: None,
                                 brick_updates: vec![BrickUpdate {
                                     brick_index: *existing_brick,
@@ -150,13 +156,13 @@ pub(crate) fn handle_tree_updates<T: VoxelData>(
                         }
                     }
                 } else {
-                    let mip_update = data_handler.add_brick(tree, node_mip_entry);
-                    if mip_update.allocation_failed {
+                    if let Ok(mip_update) = data_handler.add_brick(tree, node_mip_entry) {
+                        cache_updates.push(mip_update);
+                    } else {
                         // Can't fit new MIP brick into buffers, need to rebuild the pipeline
                         re_evaluate_view_size(view);
                         return cache_updates; // voxel data still needs to be written out
                     }
-                    cache_updates.push(mip_update);
                 }
             }
             node_bounds = node_bounds.child_bounds_for(child_sectant);
@@ -184,7 +190,6 @@ pub(crate) fn handle_tree_updates<T: VoxelData>(
                         .get_by_right(&brick_ownership_entry)
                     {
                         cache_updates.push(CacheUpdatePackage {
-                            allocation_failed: false,
                             added_node: None,
                             brick_updates: vec![BrickUpdate {
                                 brick_index: *brick_index,
@@ -193,7 +198,15 @@ pub(crate) fn handle_tree_updates<T: VoxelData>(
                             modified_nodes: vec![],
                         });
                     } else {
-                        cache_updates.push(data_handler.add_brick(tree, brick_ownership_entry));
+                        if let Ok(brick_update) =
+                            data_handler.add_brick(tree, brick_ownership_entry)
+                        {
+                            cache_updates.push(brick_update);
+                        } else {
+                            // Can't fit new brick into buffers, need to rebuild the pipeline
+                            re_evaluate_view_size(view);
+                            return cache_updates; // voxel data still needs to be written out
+                        }
                     }
                 }
             },
@@ -230,7 +243,6 @@ pub(crate) fn handle_tree_updates<T: VoxelData>(
                 // Re-upload relevant child bricks already inside the to GPU one more time
                 for (brick_index, brick_ownership_entry) in brick_update_requests {
                     cache_updates.push(CacheUpdatePackage {
-                        allocation_failed: false,
                         added_node: None,
                         brick_updates: vec![BrickUpdate {
                             brick_index,
@@ -242,13 +254,13 @@ pub(crate) fn handle_tree_updates<T: VoxelData>(
 
                 // Upload new bricks
                 for brick_request in new_brick_requests {
-                    let brick_update = data_handler.add_brick(tree, brick_request);
-                    if brick_update.allocation_failed {
+                    if let Ok(brick_update) = data_handler.add_brick(tree, brick_request) {
+                        cache_updates.push(brick_update);
+                    } else {
                         // Can't fit new brick brick into buffers, need to rebuild the pipeline
                         re_evaluate_view_size(view);
                         return cache_updates; // voxel data still needs to be written out
                     }
-                    cache_updates.push(brick_update);
                 }
             }
         }
@@ -400,18 +412,6 @@ impl PartialEq for BrickOwnedBy {
                 node_key == other_node_key
             }
             _ => false,
-        }
-    }
-}
-
-impl CacheUpdatePackage {
-    /// Error state when memory allocation failed for an item within the GPU buffers
-    pub(crate) fn allocation_failed() -> Self {
-        CacheUpdatePackage {
-            allocation_failed: true,
-            added_node: None,
-            brick_updates: vec![],
-            modified_nodes: vec![],
         }
     }
 }

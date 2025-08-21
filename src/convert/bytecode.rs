@@ -688,7 +688,6 @@ where
 {
     const MAX_DEPTH: usize = SERIALIZE_MAX_DEPTH;
     fn encode(&self, encoder: SingleItemEncoder) -> Result<(), BencodeError> {
-        //TODO: encode/decode node data
         encoder.emit_list(|e| {
             e.emit(crate::version())?;
             e.emit_int(self.auto_simplify as u8)?;

@@ -5,7 +5,7 @@ use bevy_panorbit_camera::PanOrbitCamera;
 use bevy_pkv::PkvStore;
 use voxelhex::{
     boxtree::{V3c, V3cf32},
-    raytracing::{BoxTreeGPUHost, VhxViewSet},
+    raytracing::VhxViewSet,
 };
 
 pub(crate) fn setup_mouse_action(
@@ -196,8 +196,18 @@ pub(crate) fn handle_camera_update(
             .expect("Expected to be able to store camera_position");
         }
 
+        // Reset camera position to 0
+        if keys.just_pressed(KeyCode::F10)
+            && (keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight))
+        {
+            cam.target_focus = Vec3::new(0., 0., 0.);
+        }
+
         // Load camera position
-        if keys.just_pressed(KeyCode::F10) {
+        if keys.just_pressed(KeyCode::F10)
+            && !keys.pressed(KeyCode::ControlLeft)
+            && !keys.pressed(KeyCode::ControlRight)
+        {
             let pos = pkv
                 .get::<CameraPosition>("camera_position")
                 .unwrap_or_default();

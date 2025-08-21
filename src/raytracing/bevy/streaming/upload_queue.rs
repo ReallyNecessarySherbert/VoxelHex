@@ -312,42 +312,32 @@ pub(crate) fn process<T: VoxelData>(
             };
             debug_assert!(tree.nodes.key_is_valid(node_key));
 
-            // Evaluate if target node is already uploaded
-            if data_handler
+            // Upload Selected Node to GPU
+            let node_already_in_gpu = data_handler
                 .upload_targets
                 .node_key_vs_meta_index
-                .contains_left(&node_key)
-            {
-                // Upload MIP again, if not present already
-                let mip_update =
-                    data_handler.add_brick(tree, BrickOwnedBy::NodeAsMIP(node_key as u32));
-                if mip_update.allocation_failed {
-                    // Can't fit new mip brick into buffers, need to rebuild the pipeline
+                .contains_left(&node_key);
+
+            if !node_already_in_gpu {
+                if let Ok(new_node_update) = data_handler.add_node(tree, parent_key, target_sectant)
+                {
+                    cache_updates.push(new_node_update);
+                } else {
+                    // Can't fit new node into buffers, need to rebuild the pipeline
                     re_evaluate_view_size(view);
                     return cache_updates; // voxel data still needs to be written out
                 }
+            }
+
+            // Upload MIP again, if not present already
+            if let Ok(mip_update) =
+                data_handler.add_brick(tree, BrickOwnedBy::NodeAsMIP(node_key as u32))
+            {
                 cache_updates.push(mip_update);
             } else {
-                // Upload Selected Node to GPU
-                let new_node_update = data_handler.add_node(tree, parent_key, target_sectant);
-
-                if new_node_update.allocation_failed {
-                    // Can't fit new brick into buffers, need to rebuild the pipeline
-                    re_evaluate_view_size(view);
-                    return cache_updates; // voxel data still needs to be written out
-                }
-                cache_updates.push(new_node_update);
-
-                // Upload MIP to GPU
-                let mip_update =
-                    data_handler.add_brick(tree, BrickOwnedBy::NodeAsMIP(node_key as u32));
-
-                if mip_update.allocation_failed {
-                    // Can't fit new MIP brick into buffers, need to rebuild the pipeline
-                    re_evaluate_view_size(view);
-                    return cache_updates; // voxel data still needs to be written out
-                }
-                cache_updates.push(mip_update);
+                // Can't fit new mip brick into buffers, need to rebuild the pipeline
+                re_evaluate_view_size(view);
+                return cache_updates; // voxel data still needs to be written out
             }
 
             // Push the children into the brick upload list
@@ -399,13 +389,13 @@ pub(crate) fn process<T: VoxelData>(
             continue;
         }
 
-        let brick_update = data_handler.add_brick(tree, brick_request.clone());
-        if brick_update.allocation_failed {
+        if let Ok(brick_update) = data_handler.add_brick(tree, brick_request) {
+            cache_updates.push(brick_update);
+        } else {
             // Can't fit new brick brick into buffers, need to rebuild the pipeline
             re_evaluate_view_size(view);
             return cache_updates; // voxel data still needs to be written out
         }
-        cache_updates.push(brick_update);
     }
 
     cache_updates

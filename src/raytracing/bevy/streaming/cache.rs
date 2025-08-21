@@ -228,7 +228,7 @@ impl BoxTreeGPUDataHandler {
         tree: &BoxTree<T>,
         parent_key: usize,
         target_sectant: u8,
-    ) -> CacheUpdatePackage {
+    ) -> Result<CacheUpdatePackage, ()> {
         let node_key = if target_sectant < BOX_NODE_CHILDREN_COUNT as u8 {
             tree.nodes.get(parent_key).child(target_sectant)
         } else {
@@ -236,7 +236,6 @@ impl BoxTreeGPUDataHandler {
         };
 
         let mut modifications = CacheUpdatePackage {
-            allocation_failed: false,
             added_node: None,
             brick_updates: vec![],
             modified_nodes: vec![],
@@ -260,35 +259,15 @@ impl BoxTreeGPUDataHandler {
             (*existing_node, None)
         } else {
             let Some((node_index, robbed_parent)) = self.first_available_node() else {
-                return CacheUpdatePackage::allocation_failed();
+                return Err(());
             };
             modifications.added_node = Some(node_index);
             (node_index, robbed_parent)
         };
 
-        let robbed_node_key_in_meta = self
-            .upload_targets
-            .node_key_vs_meta_index
-            .get_by_right(&node_index)
-            .cloned();
-
         self.upload_targets
             .node_key_vs_meta_index
             .insert(node_key, node_index);
-
-        if modifications.allocation_failed {
-            // allocation failed! Can't upload node after all, undo ownership update
-            if let Some(robbed_node_key_in_meta) = robbed_node_key_in_meta {
-                self.upload_targets
-                    .node_key_vs_meta_index
-                    .insert(robbed_node_key_in_meta, node_index);
-            } else {
-                self.upload_targets
-                    .node_key_vs_meta_index
-                    .remove_by_right(&node_index);
-            }
-            return modifications;
-        }
 
         // overwrite a currently present node if needed
         if let Some(robbed_parent) = robbed_parent {
@@ -472,7 +451,7 @@ impl BoxTreeGPUDataHandler {
                 }
             }
         };
-        modifications
+        Ok(modifications)
     }
 
     //##############################################################################
@@ -630,12 +609,12 @@ impl BoxTreeGPUDataHandler {
         &mut self,
         tree: &BoxTree<T>,
         brick_request: BrickOwnedBy,
-    ) -> CacheUpdatePackage
+    ) -> Result<CacheUpdatePackage, ()>
     where
         T: Default + Clone + Eq + Send + Sync + Hash + VoxelData + 'static,
     {
         let Some(brick_index) = self.first_available_brick(tree.brick_dim as f32) else {
-            return CacheUpdatePackage::allocation_failed();
+            return Err(());
         };
         let (parent_node_key, target_sectant) = match brick_request {
             BrickOwnedBy::None => {
@@ -726,14 +705,13 @@ impl BoxTreeGPUDataHandler {
             .expect("Expected to be able to update brick ownership entries")
             .insert(brick_index, brick_request.clone());
 
-        CacheUpdatePackage {
-            allocation_failed: false,
+        Ok(CacheUpdatePackage {
             added_node: None,
             brick_updates: vec![BrickUpdate {
                 brick_index,
                 owned_by: brick_request,
             }],
             modified_nodes,
-        }
+        })
     }
 }
