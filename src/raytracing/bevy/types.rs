@@ -192,9 +192,6 @@ pub(crate) struct BoxTreeRenderDataResources {
     /// which is stored in 2 * u32 values. only available in GPU, to eliminate needles redundancy
     pub(crate) node_ocbits_buffer: Buffer,
 
-    /// Buffer of node occupied boxes
-    pub(crate) node_ocbox_buffer: Buffer,
-
     /// Buffer of Voxel Bricks. Each brick contains voxel_brick_dim^3 elements.
     /// Each Brick has a corresponding 64 bit occupancy bitmap in the @voxel_maps buffer.
     /// Only available in GPU, to eliminate needles redundancy
@@ -252,9 +249,6 @@ pub(crate) struct BoxTreeRenderData {
     /// Buffer of Node occupancy bitmaps. Each node has a 64 bit bitmap,
     /// which is stored in 2 * u32 values
     pub(crate) node_ocbits: Vec<u32>,
-
-    /// Buffer of Node occupancy boxes
-    pub(crate) node_ocbox: Vec<u32>,
 
     /// Stores each unique color, it is references in @voxels
     /// and in @children_buffer as well( in case of solid bricks )

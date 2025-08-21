@@ -184,7 +184,6 @@ impl NodeData {
             children: NodeChildren::NoChildren,
             mip: BrickData::Empty,
             occupied_bits: 0,
-            occupied_box: 0,
             occlusion_bits: 0,
         }
     }
@@ -196,7 +195,6 @@ impl NodeData {
             children: NodeChildren::NoChildren,
             mip: BrickData::Solid(voxel),
             occupied_bits: u64::MAX,
-            occupied_box: 0x3FFF8000,
             occlusion_bits: 0,
         }
     }
@@ -207,9 +205,8 @@ impl NodeData {
             content: NodeContent::UniformLeaf(brick),
             children: NodeChildren::NoChildren,
             mip: BrickData::Empty,
-            occupied_bits,
-            occupied_box: 0,
             occlusion_bits: 0,
+            occupied_bits,
         }
     }
 

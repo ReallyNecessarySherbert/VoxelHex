@@ -406,46 +406,6 @@ impl<T: VoxelData> BoxTree<T> {
         Ok(())
     }
 
-    fn bounds_from_occupied_box(occupied_box: u32, node_bounds: &Cube) -> (V3c<f32>, V3c<f32>) {
-        let ocbox_unit = node_bounds.size / 31.;
-        (
-            node_bounds.min_position
-                + V3c::new(
-                    (occupied_box & 0x0000001F) as f32,
-                    ((occupied_box & 0x00003E0) >> 5) as f32,
-                    ((occupied_box & 0x00007C00) >> 10) as f32,
-                ) * ocbox_unit,
-            node_bounds.min_position
-                + V3c::new(
-                    ((occupied_box & 0x000F8000) >> 15) as f32,
-                    ((occupied_box & 0x01F00000) >> 20) as f32,
-                    ((occupied_box & 0x3E000000) >> 25) as f32,
-                ) * ocbox_unit,
-        )
-    }
-
-    fn occupied_box_from_bounds(node_bounds: &Cube, min_pos: V3c<f32>, max_pos: V3c<f32>) -> u32 {
-        let ocbox_min_x =
-            (31. * (min_pos.x - node_bounds.min_position.x) / node_bounds.size).floor() as u32;
-        let ocbox_min_y =
-            (31. * (min_pos.y - node_bounds.min_position.y) / node_bounds.size).floor() as u32;
-        let ocbox_min_z =
-            (31. * (min_pos.z - node_bounds.min_position.z) / node_bounds.size).floor() as u32;
-        let ocbox_max_x =
-            (31. * (max_pos.x - node_bounds.min_position.x) / node_bounds.size).ceil() as u32;
-        let ocbox_max_y =
-            (31. * (max_pos.y - node_bounds.min_position.y) / node_bounds.size).ceil() as u32;
-        let ocbox_max_z =
-            (31. * (max_pos.z - node_bounds.min_position.z) / node_bounds.size).ceil() as u32;
-
-        ocbox_min_x.clamp(0, 31)
-            | (ocbox_min_y.clamp(0, 31) << 5)
-            | (ocbox_min_z.clamp(0, 31) << 10)
-            | (ocbox_max_x.clamp(0, 31) << 15)
-            | (ocbox_max_y.clamp(0, 31) << 20)
-            | (ocbox_max_z.clamp(0, 31) << 25)
-    }
-
     /// Handles node post-process for connections, content, mips, occupied bits and occlusion bits
     /// after data insertion
     fn post_process_node_insert(
@@ -464,36 +424,6 @@ impl<T: VoxelData> BoxTree<T> {
             self.nodes.get_mut(node_key).content = NodeContent::Internal;
             self.nodes.get_mut(node_key).occupied_bits = 0;
         }
-
-        // Update Node occupied box
-        let (mut ocbox_min, mut ocbox_max) =
-            Self::bounds_from_occupied_box(self.nodes.get(node_key).occupied_box, node_bounds);
-        let update_max_point = V3c::<f32>::from(*insert_position) + V3c::unit(insert_size as f32);
-        if ocbox_min == ocbox_max {
-            ocbox_min = V3c::from(*insert_position);
-            ocbox_max = update_max_point
-        } else {
-            ocbox_min.cut_by(V3c::from(*insert_position));
-            ocbox_max = V3c::new(
-                ocbox_max.x.max(update_max_point.x),
-                ocbox_max.y.max(update_max_point.y),
-                ocbox_max.z.max(update_max_point.z),
-            );
-        }
-        self.nodes.get_mut(node_key).occupied_box =
-            Self::occupied_box_from_bounds(node_bounds, ocbox_min, ocbox_max);
-        debug_assert!(
-            ocbox_min.x <= insert_position.x as f32
-                && ocbox_min.y <= insert_position.y as f32
-                && ocbox_min.z <= insert_position.z as f32
-                && ocbox_max.x >= update_max_point.x as f32
-                && ocbox_max.y >= update_max_point.y as f32
-                && ocbox_max.z >= update_max_point.z as f32
-        );
-        debug_assert_eq!(
-            Self::bounds_from_occupied_box(self.nodes.get(node_key).occupied_box, node_bounds),
-            (ocbox_min, ocbox_max)
-        );
 
         // Update Node occupied bits
         let mut new_occupied_bits = self.nodes.get(node_key).occupied_bits;
@@ -563,74 +493,4 @@ impl<T: VoxelData> BoxTree<T> {
 
         self.update_mip(node_key, node_bounds, insert_position);
     }
-}
-
-#[test]
-fn test_occupied_box_fully_covering_node() {
-    let min_position = V3c::new(33., 42., 50.);
-    let size = 100.;
-    let node_bounds = Cube { min_position, size };
-    assert_eq!(
-        BoxTree::<u32>::bounds_from_occupied_box(0x3FFF8000, &node_bounds),
-        (min_position, min_position + V3c::unit(size))
-    );
-
-    assert_eq!(
-        BoxTree::<u32>::occupied_box_from_bounds(
-            &node_bounds,
-            min_position,
-            min_position + V3c::unit(size),
-        ),
-        0x3FFF8000
-    );
-
-    assert_eq!(
-        BoxTree::<u32>::bounds_from_occupied_box(
-            BoxTree::<u32>::occupied_box_from_bounds(
-                &node_bounds,
-                min_position,
-                min_position + V3c::unit(size),
-            ),
-            &node_bounds
-        ),
-        (min_position, min_position + V3c::unit(size))
-    );
-}
-
-#[test]
-fn test_occupied_box_partly_covering_node() {
-    let min_position = V3c::new(33., 42., 50.);
-    let size = 100.;
-    let node_bounds = Cube { min_position, size };
-    assert_eq!(
-        BoxTree::<u32>::bounds_from_occupied_box(0x3DEF0421, &node_bounds),
-        (
-            min_position + V3c::unit(size / 31.),
-            min_position + V3c::unit(size) - V3c::unit(size / 31.),
-        )
-    );
-
-    assert_eq!(
-        BoxTree::<u32>::occupied_box_from_bounds(
-            &node_bounds,
-            min_position + V3c::unit(size / 31.),
-            min_position + V3c::unit(size) - V3c::unit(size / 31.),
-        ),
-        0x3DEF0421
-    );
-
-    assert_eq!(
-        BoxTree::<u32>::bounds_from_occupied_box(
-            BoxTree::<u32>::occupied_box_from_bounds(
-                &node_bounds,
-                min_position + V3c::unit(size / 31.),
-                min_position + V3c::unit(size) - V3c::unit(size / 31.),
-            ),
-            &node_bounds
-        ),
-        (
-            min_position + V3c::unit(size / 31.),
-            min_position + V3c::unit(size) - V3c::unit(size / 31.),
-        )
-    );
 }

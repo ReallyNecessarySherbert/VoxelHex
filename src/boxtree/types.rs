@@ -169,7 +169,7 @@ pub struct MIPMapStrategy {
     pub(crate) resampling_color_matching_thresholds: HashMap<usize, f32>,
 }
 
-/// Data of BoxTree nodes
+/// Data of nodes within a BoxTree
 #[derive(Debug, Default, Clone)]
 pub(crate) struct NodeData {
     /// Type and content information of the node
@@ -183,22 +183,6 @@ pub(crate) struct NodeData {
 
     /// Occupancy information of children on the bit-level
     pub(crate) occupied_bits: u64,
-
-    /// Bounding box of occupied children
-    ///  _===============================================================_
-    /// | bit 0-4    | normalized min position x on node range           |
-    /// |----------------------------------------------------------------|
-    /// | bit 5-9    | normalized min position y on node range           |
-    /// |----------------------------------------------------------------|
-    /// | bit 10-14  | normalized min position z on node range           |
-    /// |----------------------------------------------------------------|
-    /// | bit 15-19  | normalized max position x on node range           |
-    /// |----------------------------------------------------------------|
-    /// | bit 20-24  | normalized max position y on node range           |
-    /// |----------------------------------------------------------------|
-    /// | bit 25-30  | normalized max position z on node range           |
-    /// `================================================================`
-    pub(crate) occupied_box: u32,
 
     /// Occlusion information for node sides
     ///  _===============================================================_

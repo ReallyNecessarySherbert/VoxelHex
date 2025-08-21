@@ -94,7 +94,6 @@ fn test_node_data_serialization() {
         mip: BrickData::Solid(69),
         occupied_bits: 666,
         occlusion_bits: 69,
-        occupied_box: 96,
     };
     let node_data_deserialized = NodeData::from_bencode(&node_data.to_bencode().ok().unwrap())
         .ok()

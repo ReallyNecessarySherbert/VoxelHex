@@ -531,9 +531,6 @@ pub(crate) fn upload<T: VoxelData>(
     let mut ocbits_updated = usize::MAX..0;
 
     #[allow(clippy::reversed_empty_ranges)]
-    let mut ocbox_updated = usize::MAX..0;
-
-    #[allow(clippy::reversed_empty_ranges)]
     let mut node_mips_updated = usize::MAX..0; // Any brick upload could invalidate node_mips values
     for cache_update in cache_updates.into_iter() {
         for (node_index, modified_children_bitfield) in cache_update.modified_nodes {
@@ -541,8 +538,6 @@ pub(crate) fn upload<T: VoxelData>(
             node_meta_updated.end = node_meta_updated.end.max(node_index / 16 + 1);
             ocbits_updated.start = ocbits_updated.start.min(node_index * 2);
             ocbits_updated.end = ocbits_updated.end.max(node_index * 2 + 2);
-            ocbox_updated.start = ocbox_updated.start.min(node_index);
-            ocbox_updated.end = ocbox_updated.end.max(node_index + 1);
             node_mips_updated.start = node_mips_updated.start.min(node_index);
             node_mips_updated.end = node_mips_updated.end.max(node_index + 1);
             for sectant in 0..BOX_NODE_CHILDREN_COUNT {
@@ -629,12 +624,6 @@ pub(crate) fn upload<T: VoxelData>(
         &view.data_handler.render_data.node_ocbits,
         ocbits_updated,
         &view.resources.as_ref().unwrap().node_ocbits_buffer,
-        render_queue,
-    );
-    write_range_to_buffer(
-        &view.data_handler.render_data.node_ocbox,
-        ocbox_updated,
-        &view.resources.as_ref().unwrap().node_ocbox_buffer,
         render_queue,
     );
     write_range_to_buffer(

@@ -262,7 +262,6 @@ impl ToBencode for NodeData {
             e.emit(self.children)?;
             e.emit(&self.mip)?;
             e.emit(self.occupied_bits)?;
-            e.emit(self.occupied_box)?;
             e.emit(self.occlusion_bits)
         })
     }
@@ -288,10 +287,6 @@ impl FromBencode for NodeData {
                     list.next_object()?
                         .expect("Expected Node occupied bits from byte stream!"),
                 )?;
-                let occupied_box = u32::decode_bencode_object(
-                    list.next_object()?
-                        .expect("Expected Node occupied box from byte stream!"),
-                )?;
                 let occlusion_bits = u8::decode_bencode_object(
                     list.next_object()?
                         .expect("Expected Node occlusion bits from byte stream!"),
@@ -301,7 +296,6 @@ impl FromBencode for NodeData {
                     children,
                     mip,
                     occupied_bits,
-                    occupied_box,
                     occlusion_bits,
                 })
             }
