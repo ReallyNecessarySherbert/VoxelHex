@@ -6,8 +6,8 @@ use crate::{
     spatial::{
         lut::RAY_TO_NODE_OCCUPANCY_BITMASK_LUT,
         math::{flat_projection, hash_direction, offset_sectant},
-        raytracing::{cube_impact_normal, step_sectant, Ray},
-        Cube,
+        raytracing::{cube_impact_normal, Ray},
+        step_sectant, Cube,
     },
 };
 

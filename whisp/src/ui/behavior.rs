@@ -1,6 +1,6 @@
 use crate::{
     loader::TreeLoadingTask,
-    ui::{UiState, components::*},
+    ui::{components::*, UiState},
 };
 use bevy::{
     diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin},

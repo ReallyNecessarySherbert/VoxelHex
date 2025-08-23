@@ -64,19 +64,20 @@ impl<T: VoxelData> BoxTree<T> {
             };
 
         // determine the sampling range
-        let (sample_start, sample_size) = match &self.nodes.get(node_key).content {
+        let mut node = self.nodes.get_mut(node_key);
+        let (sample_start, sample_size) = match &node.content {
             NodeContent::Nothing => {
                 debug_assert!(
-                    matches!(self.nodes.get(node_key).children, NodeChildren::NoChildren),
+                    matches!(node.children, NodeChildren::NoChildren),
                     "Expected empty node to not have children: {:?}",
-                    self.nodes.get(node_key).children
+                    node.children
                 );
                 return;
             }
             NodeContent::UniformLeaf(_brick) => {
-                if !matches!(self.nodes.get(node_key).mip, BrickData::Empty) {
-                    //Uniform Leaf nodes need not a MIP, because their content is equivalent with it
-                    self.nodes.get_mut(node_key).mip = BrickData::Empty;
+                if !matches!(node.mip, BrickData::Empty) {
+                    // Uniform Leaf nodes do not need a MIP, because their content is equivalent with it
+                    node.mip = BrickData::Empty;
                 }
                 return;
             }
@@ -184,6 +185,7 @@ impl<T: VoxelData> BoxTree<T> {
                 (sample_start, sample_size)
             }
         };
+        std::mem::drop(node);
 
         let sampled_color = match self.nodes.get(node_key).content {
             NodeContent::Nothing | NodeContent::UniformLeaf(_) => None,
@@ -314,17 +316,18 @@ impl<T: VoxelData> BoxTree<T> {
                 pos_in_mip.z,
                 self.brick_dim as usize,
             );
-            match &mut self.nodes.get_mut(node_key).mip {
+            let mip = &mut self.nodes.get_mut(node_key).mip;
+            match mip {
                 BrickData::Empty => {
                     let mut new_brick_data =
                         vec![empty_marker::<PaletteIndexValues>(); self.brick_dim.pow(3) as usize];
                     new_brick_data[flat_pos_in_mip] = mip_entry;
-                    self.nodes.get_mut(node_key).mip = BrickData::Parted(new_brick_data);
+                    *mip = BrickData::Parted(new_brick_data);
                 }
                 BrickData::Solid(voxel) => {
                     let mut new_brick_data = vec![*voxel; self.brick_dim.pow(3) as usize];
                     new_brick_data[flat_pos_in_mip] = mip_entry;
-                    self.nodes.get_mut(node_key).mip = BrickData::Parted(new_brick_data);
+                    *mip = BrickData::Parted(new_brick_data);
                 }
                 BrickData::Parted(brick) => {
                     brick[flat_pos_in_mip] = mip_entry;

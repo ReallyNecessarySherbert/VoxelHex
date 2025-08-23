@@ -3,7 +3,7 @@ members = ["whisp"]
 
 [package]
 name = "voxelhex"
-version = "0.4.1"
+version = "0.6.0"
 edition = "2024"
 authors = ["Dávid Tóth <toth.david.munka@gmail.com>"]
 license = "MIT OR Apache-2.0"
@@ -38,6 +38,7 @@ bevy = { version = "0.16.0", features = ["wayland"], optional = true }
 # maybe try lldb-sys?!
 rand = "0.8.5"
 criterion = { version = "0.4", features = ["html_reports"] }
+rayon = "1.10.0"
 
 # for example cpu_render
 image = "0.25.1"

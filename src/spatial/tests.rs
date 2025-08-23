@@ -18,7 +18,7 @@ mod sectant_tests {
     use crate::spatial::{math::offset_sectant, V3c};
 
     #[cfg(feature = "raytracing")]
-    use crate::{boxtree::BOX_NODE_CHILDREN_COUNT, spatial::raytracing::step_sectant};
+    use crate::{boxtree::BOX_NODE_CHILDREN_COUNT, spatial::step_sectant};
 
     #[test]
     fn test_hash_region() {

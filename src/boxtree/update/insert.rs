@@ -13,8 +13,7 @@ use crate::{
 #[cfg(debug_assertions)]
 use crate::boxtree::BOX_NODE_CHILDREN_COUNT;
 
-impl<T: VoxelData> BoxTree<T>
-{
+impl<T: VoxelData> BoxTree<T> {
     /// Inserts the given data into the boxtree into the given voxel position
     /// If there is already available data it overwrites it, except if all components are empty
     /// If all components are empty, this is a no-op, to erase data, please use @clear
@@ -71,7 +70,7 @@ impl<T: VoxelData> BoxTree<T>
         self.insert_at_lod_internal(overwrite_if_empty, position, 1, data)
     }
 
-    pub fn insert_at_lod_internal(
+    fn insert_at_lod_internal(
         &mut self,
         overwrite_if_empty: bool,
         position_u32: &V3c<u32>,
@@ -142,9 +141,10 @@ impl<T: VoxelData> BoxTree<T>
 
                             // Whole child node to be overwritten with data
                             // Occupied bits are correctly set in post-processing
-                            if let NodeContent::Leaf(_) | NodeContent::UniformLeaf(_) =
-                                self.nodes.get(current_node_key).content
-                            {
+                            if matches!(
+                                self.nodes.get(current_node_key).content,
+                                NodeContent::Leaf(_) | NodeContent::UniformLeaf(_)
+                            ) {
                                 self.subdivide_leaf_to_nodes(
                                     current_node_key,
                                     child_sectant as usize,
@@ -268,17 +268,20 @@ impl<T: VoxelData> BoxTree<T>
                     } else {
                         // current Node is a non-leaf Node, which doesn't have the child at the requested position,
                         // so it is inserted and the Node becomes non-empty
-                        match self.nodes.get(current_node_key).content {
-                            NodeContent::Nothing => {
-                                // A special case during the first insertion, where the root Node was empty beforehand
-                                self.nodes.get_mut(current_node_key).content =
-                                    NodeContent::Internal;
-                                self.nodes.get_mut(current_node_key).occupied_bits = 0;
-                            }
-                            NodeContent::Internal => {} // Nothing to do
-                            NodeContent::Leaf(_) | NodeContent::UniformLeaf(_) => {
-                                panic!("Leaf Node expected to be non-leaf!");
-                            }
+                        debug_assert!(
+                            matches!(
+                                self.nodes.get(current_node_key).content,
+                                NodeContent::Nothing | NodeContent::Internal
+                            ),
+                            "Node expected to be non-leaf!"
+                        );
+                        if matches!(
+                            self.nodes.get(current_node_key).content,
+                            NodeContent::Nothing
+                        ) {
+                            // A special case during the first insertion, where the root Node was empty beforehand
+                            self.nodes.get_mut(current_node_key).content = NodeContent::Internal;
+                            self.nodes.get_mut(current_node_key).occupied_bits = 0;
                         }
 
                         // Insert a new child Node
@@ -417,7 +420,7 @@ impl<T: VoxelData> BoxTree<T>
         let node_key = node_stack.last().unwrap().0;
 
         // In case any node is NodeContent::Nothing, it is to be converted to an internal node
-        if let NodeContent::Nothing = self.nodes.get(node_key).content {
+        if matches!(self.nodes.get(node_key).content, NodeContent::Nothing) {
             self.nodes.get_mut(node_key).content = NodeContent::Internal;
             self.nodes.get_mut(node_key).occupied_bits = 0;
         }

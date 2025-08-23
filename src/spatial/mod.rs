@@ -9,9 +9,21 @@ pub mod raytracing;
 mod tests;
 
 use crate::{
-    boxtree::BOX_NODE_DIMENSION, spatial::lut::SECTANT_OFFSET_LUT, spatial::math::offset_sectant,
-    spatial::math::vector::V3c,
+    boxtree::BOX_NODE_DIMENSION,
+    spatial::{
+        lut::{SECTANT_OFFSET_LUT, SECTANT_STEP_RESULT_LUT},
+        math::{offset_sectant, vector::V3c},
+    },
 };
+
+/// Provides the resulting sectant based on the given sectant
+/// Returns with a value larger than `BOX_NODE_CHILDREN_COUNT - 1` when out of bounds.
+/// Important note: the specs of `signum` behvaes differently for f32 and i32
+/// So the conversion to i32 is absolutely required
+pub(crate) const fn step_sectant(sectant: u8, step: V3c<f32>) -> u8 {
+    SECTANT_STEP_RESULT_LUT[sectant as usize][((step.x as i32).signum() + 1) as usize]
+        [((step.y as i32).signum() + 1) as usize][((step.z as i32).signum() + 1) as usize]
+}
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum CubeSides {

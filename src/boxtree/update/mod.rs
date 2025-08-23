@@ -21,8 +21,7 @@ use crate::{
 use num_traits::Zero;
 use std::fmt::Debug;
 
-impl<T: VoxelData> BoxTree<T>
-{
+impl<T: VoxelData> BoxTree<T> {
     //####################################################################################
     // ███████████    █████████   █████       ██████████ ███████████ ███████████ ██████████
     // ░░███░░░░░███  ███░░░░░███ ░░███       ░░███░░░░░█░█░░░███░░░█░█░░░███░░░█░░███░░░░░█
@@ -152,7 +151,8 @@ impl<T: VoxelData> BoxTree<T>
     ) -> bool {
         // Update the leaf node, if it is possible as is, and if it's even needed to update
         // and decide if the node content needs to be divided into bricks, and the update function to be called again
-        match &mut self.nodes.get_mut(node_key).content {
+        let mut node = self.nodes.get_mut(node_key);
+        match &mut node.content {
             NodeContent::Leaf(bricks) => {
                 // In case brick_dimension == boxtree size, the 0 can not be a leaf...
                 debug_assert!(self.brick_dim < self.boxtree_size);
@@ -230,10 +230,9 @@ impl<T: VoxelData> BoxTree<T>
                 match mat {
                     BrickData::Empty => {
                         debug_assert_eq!(
-                            self.nodes.get(node_key).occupied_bits,
-                            0,
+                            node.occupied_bits, 0,
                             "Expected Node OccupancyBitmap 0 for empty leaf node instead of {:?}",
-                            self.nodes.get(node_key).occupied_bits
+                            node.occupied_bits
                         );
                         if !NodeContent::pix_points_to_empty(
                             &target_content,
@@ -247,6 +246,7 @@ impl<T: VoxelData> BoxTree<T>
                                     .unwrap();
 
                             // Add a brick to the target sectant and update with the given data
+                            std::mem::drop(node);
                             let mut new_brick = vec![
                                 self.add_to_palette(&BoxTreeEntry::Empty);
                                 self.brick_dim.pow(3) as usize
@@ -279,7 +279,7 @@ impl<T: VoxelData> BoxTree<T>
                         ) {
                             // Data request is to clear, it aligns with the voxel content,
                             // it's enough to update the node content in this case
-                            self.nodes.get_mut(node_key).content = NodeContent::Nothing;
+                            node.content = NodeContent::Nothing;
                             return false;
                         }
 
@@ -306,6 +306,7 @@ impl<T: VoxelData> BoxTree<T>
                                     as usize
                             ]);
 
+                            std::mem::drop(node);
                             return self.leaf_update(
                                 overwrite_if_empty,
                                 (node_key, node_bounds),
@@ -400,11 +401,12 @@ impl<T: VoxelData> BoxTree<T>
                             leaf_data[sectant] = BrickData::Parted(new_brick);
                         }
 
-                        self.nodes.get_mut(node_key).content = NodeContent::Leaf(leaf_data);
+                        node.content = NodeContent::Leaf(leaf_data);
                         debug_assert!(updated, "Expected Leaf node to be updated in operation");
                         return updated;
                     }
                 }
+                std::mem::drop(node);
                 self.leaf_update(
                     overwrite_if_empty,
                     (node_key, node_bounds),
@@ -415,7 +417,8 @@ impl<T: VoxelData> BoxTree<T>
             }
             NodeContent::Internal => {
                 // Warning: Calling leaf update to an internal node might induce data loss - see #69
-                self.nodes.get_mut(node_key).children = NodeChildren::NoChildren;
+                node.children = NodeChildren::NoChildren;
+                std::mem::drop(node);
                 self.nodes.get_mut(node_key).content = NodeContent::Leaf(
                     (0..BOX_NODE_CHILDREN_COUNT)
                         .map(|sectant| {
@@ -438,6 +441,7 @@ impl<T: VoxelData> BoxTree<T>
                 // Calling leaf update on Nothing is an odd thing to do..
                 // But possible, if this call is mid-update
                 // So let's try to gather all the information possible
+                std::mem::drop(node);
                 self.nodes.get_mut(node_key).content = NodeContent::Leaf(
                     (0..BOX_NODE_CHILDREN_COUNT)
                         .map(|sectant| {
@@ -631,7 +635,8 @@ impl<T: VoxelData> BoxTree<T>
                 }
             }
 
-            match &mut self.nodes.get_mut(node_key).content {
+            let mut node = self.nodes.get_mut(node_key);
+            match &mut node.content {
                 NodeContent::Nothing => true,
                 NodeContent::UniformLeaf(brick) => match brick {
                     BrickData::Empty => true,
@@ -642,18 +647,18 @@ impl<T: VoxelData> BoxTree<T>
                             &self.voxel_data_palette,
                         ) {
                             debug_assert_eq!(
-                                0, self.nodes.get(node_key).occupied_bits,
+                                0, node.occupied_bits,
                                 "Solid empty voxel should have its occupied bits set to 0, instead of {:#10X}",
-                                self.nodes.get(node_key).occupied_bits
+                                node.occupied_bits
                             );
-                            self.nodes.get_mut(node_key).content = NodeContent::Nothing;
-                            self.nodes.get_mut(node_key).children = NodeChildren::NoChildren;
+                            node.content = NodeContent::Nothing;
+                            node.children = NodeChildren::NoChildren;
                             true
                         } else {
                             debug_assert_eq!(
-                                u64::MAX, self.nodes.get(node_key).occupied_bits,
+                                u64::MAX, node.occupied_bits,
                                 "Solid full voxel should have its occupied bits set to u64::MAX, instead of {:#10X}",
-                                self.nodes.get(node_key).occupied_bits
+                                node.occupied_bits
                             );
                             false
                         }
@@ -661,8 +666,7 @@ impl<T: VoxelData> BoxTree<T>
                     BrickData::Parted(_brick) => {
                         if brick.simplify(&self.voxel_color_palette, &self.voxel_data_palette) {
                             debug_assert!(
-                                self.nodes.get(node_key).occupied_bits == u64::MAX
-                                || self.nodes.get(node_key).occupied_bits == 0,
+                                node.occupied_bits == u64::MAX || node.occupied_bits == 0,
                                 "Expected brick occuped bits of node[{node_key}] to be either full or empty, becasue it could be simplified",
                             );
                             true
@@ -700,11 +704,11 @@ impl<T: VoxelData> BoxTree<T>
                     let mut unified_brick = BrickData::Empty;
                     if is_leaf_uniform_solid {
                         debug_assert_ne!(uniform_solid_value, None);
-                        self.nodes.get_mut(node_key).content = NodeContent::UniformLeaf(
-                            BrickData::Solid(*uniform_solid_value.unwrap()),
-                        );
+                        node.content = NodeContent::UniformLeaf(BrickData::Solid(
+                            *uniform_solid_value.unwrap(),
+                        ));
                         debug_assert_eq!(
-                            self.nodes.get(node_key).occupied_bits,
+                            node.occupied_bits,
                             u64::MAX,
                             "Expected Leaf with uniform solid value to have u64::MAX value"
                         );
@@ -796,33 +800,30 @@ impl<T: VoxelData> BoxTree<T>
                     }
 
                     if !matches!(unified_brick, BrickData::Empty) {
-                        self.nodes.get_mut(node_key).content =
-                            NodeContent::UniformLeaf(unified_brick);
+                        node.content = NodeContent::UniformLeaf(unified_brick);
                     }
 
                     simplified
                 }
                 NodeContent::Internal => {
-                    if 0 == self.nodes.get(node_key).occupied_bits
-                        || matches!(self.nodes.get(node_key).children, NodeChildren::NoChildren)
+                    if 0 == node.occupied_bits || matches!(node.children, NodeChildren::NoChildren)
                     {
-                        if let NodeContent::Nothing = self.nodes.get(node_key).content {
+                        if let NodeContent::Nothing = node.content {
                             return false;
                         }
 
-                        self.nodes.get_mut(node_key).content = NodeContent::Nothing;
+                        node.content = NodeContent::Nothing;
                         return true;
                     }
 
-                    let child_keys = if let NodeChildren::Children(children) =
-                        self.nodes.get(node_key).children
-                    {
+                    let child_keys = if let NodeChildren::Children(children) = node.children {
                         children
                     } else {
                         return false;
                     };
 
                     // Try to simplify each child of the node
+                    std::mem::drop(node);
                     if recursive {
                         for child_key in child_keys.iter() {
                             self.simplify(*child_key as usize, true);
@@ -833,7 +834,7 @@ impl<T: VoxelData> BoxTree<T>
                         let child_key = child_keys[0] as usize;
                         if !self.nodes.key_is_valid(child_key)
                             || !matches!(
-                                self.nodes.get(child_key).content,
+                                self.nodes.get_mut(node_key).content,
                                 NodeContent::UniformLeaf(BrickData::Solid(_))
                             )
                             || !self.compare_nodes(child_key, child_keys[sectant] as usize)

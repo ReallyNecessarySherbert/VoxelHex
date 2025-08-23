@@ -627,6 +627,7 @@ pub(crate) fn setup(mut commands: Commands, asset_server: Res<AssetServer>, pkv:
 (ctrl)F6    - Restore default
       F9    - Load Settings
       F10   - Load Camera position
+(ctrl)F10   - Look at Origin (0,0,0)
       WS    - Forward/Backward
       AD    - Move Sideways
       Shift - Move Y up

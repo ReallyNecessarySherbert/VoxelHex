@@ -360,12 +360,12 @@ impl<T: crate::boxtree::VoxelData> BoxTree<T> {
                     to_deallocate.push(*child as usize);
                 }
             }
-            for child_key in to_deallocate {
-                debug_assert_ne!(child_key, node_key, "Node referring to itself as child");
+        }
+        for child_key in to_deallocate {
+            debug_assert_ne!(child_key, node_key, "Node referring to itself as child");
 
-                self.deallocate_children_of(child_key); // Recursion should be fine as depth is not expceted to be more, than 32
-                self.nodes.free(child_key);
-            }
+            self.deallocate_children_of(child_key); // Recursion should be fine as depth is not expceted to be more, than 32
+            self.nodes.free(child_key);
         }
     }
 }

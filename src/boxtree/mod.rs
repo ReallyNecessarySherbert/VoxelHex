@@ -148,13 +148,13 @@ impl<T: VoxelData> BoxTree<T> {
     #[cfg(feature = "bytecode")]
     pub fn to_bytes(&self) -> Vec<u8> {
         self.to_bencode()
-            .expect("Failed to serialize Octree to Bytes")
+            .expect("Failed to serialize Boxtree to Bytes")
     }
 
     /// parses the data structure from a byte string
     #[cfg(feature = "bytecode")]
     pub fn from_bytes(bytes: Vec<u8>) -> Self {
-        Self::from_bencode(&bytes).expect("Failed to de-serialize Octree from bytes")
+        Self::from_bencode(&bytes).expect("Failed to de-serialize Boxtree from bytes")
     }
 
     #[cfg(feature = "bytecode")]

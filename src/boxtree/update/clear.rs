@@ -11,8 +11,7 @@ use crate::{
     },
 };
 
-impl<T: VoxelData> BoxTree<T>
-{
+impl<T: VoxelData> BoxTree<T> {
     /// clears the voxel at the given position
     pub fn clear(&mut self, position: &V3c<u32>) -> Result<(), OctreeError> {
         self.clear_at_lod(position, 1)
