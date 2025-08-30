@@ -1,6 +1,6 @@
 [package]
 name = "whisp"
-version = "0.1.4"
+version = "0.1.3"
 edition = "2024"
 authors = ["Dávid Tóth <toth.david.munka@gmail.com>"]
 license = "MIT OR Apache-2.0"
@@ -14,6 +14,8 @@ bevy_panorbit_camera = "0.26.0"
 serde = { version = "1", features = [
     "derive",
 ] } # for custom structs in bevy_pkv
+bevy_egui = "0.36.0"
+egui_plot = "0.33.0"
 
 [[bin]]
 name = "whisp"
