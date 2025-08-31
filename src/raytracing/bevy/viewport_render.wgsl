@@ -14,18 +14,18 @@ struct Cube {
     size: f32,
 }
 
-const BOX_NODE_DIMENSION = 4u;
-const BOX_NODE_DIMENSION_SQUARED = 16u;
-#define BOX_NODE_SIZE_MULTIPLIER 0.25f  //should be power of 2
-#define HALF_BOX_NODE_MULTIPLIER 0.125f
-const BOX_NODE_CHILDREN_COUNT = 64u;
-const VOXEL_EPSILON = 0.00001;
-const COLOR_FOR_NODE_REQUEST_SENT = vec3f(0.5,0.3,0.0);
-const COLOR_FOR_NODE_REQUEST_FAIL = vec3f(0.7,0.2,0.0);
-const COLOR_FOR_BRICK_REQUEST_SENT = vec3f(0.3,0.1,0.0);
-const COLOR_FOR_BRICK_REQUEST_FAIL = vec3f(0.6,0.0,0.0);
-const VHX_PREPASS_STAGE_ID = 1u;
-const VHX_RENDER_STAGE_ID = 2u;
+#define BOX_NODE_DIMENSION = 4u
+#define BOX_NODE_DIMENSION_SQUARED = 16u
+#define BOX_NODE_SIZE_MULTIPLIER 1. / BOX_NODE_DIMENSION
+#define HALF_BOX_NODE_MULTIPLIER BOX_NODE_SIZE_MULTIPLIER / 2.
+#define BOX_NODE_CHILDREN_COUNT = 64u
+#define VOXEL_EPSILON = 0.00001
+#define COLOR_FOR_NODE_REQUEST_SENT = vec3f(0.5,0.3,0.0)
+#define COLOR_FOR_NODE_REQUEST_FAIL = vec3f(0.7,0.2,0.0)
+#define COLOR_FOR_BRICK_REQUEST_SENT = vec3f(0.3,0.1,0.0)
+#define COLOR_FOR_BRICK_REQUEST_FAIL = vec3f(0.6,0.0,0.0)
+#define VHX_PREPASS_STAGE_ID = 1u
+#define VHX_RENDER_STAGE_ID = 2u
 
 //crate::spatial::math::hash_region
 fn hash_region(offset: vec3f, size: f32) -> u32 {
